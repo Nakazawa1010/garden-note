@@ -11,12 +11,13 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="theme-color" content="#f5efe1">
 <style>
-/* ホーム画面から開いたとき: iPhoneの丸い角と下のバー(ホームインジケータ)にボタンが掛からないよう下に余白 */
+/* ホーム画面から開いたとき: iPhoneの丸い角とホームバーに掛からないよう上下に余白 */
 @media (display-mode: standalone) and (max-width:760px){
   :root{--pwab:max(env(safe-area-inset-bottom),26px)}
   .mnav{padding-bottom:calc(6px + var(--pwab))!important}
   .wrap{padding-bottom:calc(84px + var(--pwab))!important}
   .mbox{padding-bottom:calc(20px + var(--pwab))!important}
+  header{padding-top:16px!important}
 }
 </style>
 <title>ガーデンノート</title>
