@@ -10,6 +10,15 @@
 <meta name="apple-mobile-web-app-title" content="ガーデンノート">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="theme-color" content="#f5efe1">
+<style>
+/* ホーム画面から開いたとき: iPhoneの丸い角と下のバー(ホームインジケータ)にボタンが掛からないよう下に余白 */
+@media (display-mode: standalone) and (max-width:760px){
+  :root{--pwab:max(env(safe-area-inset-bottom),26px)}
+  .mnav{padding-bottom:calc(6px + var(--pwab))!important}
+  .wrap{padding-bottom:calc(84px + var(--pwab))!important}
+  .mbox{padding-bottom:calc(20px + var(--pwab))!important}
+}
+</style>
 <title>ガーデンノート</title>
 <style>
 :root{--bg:#f5efe1;--card:#fffdf7;--ink:#3b3428;--sub:#7a6f5c;--line:#e2d8c2;--ac:#3f6fb5;--ac2:#c2557c;--ok:#4f8a3a;--warn:#c0602e}
