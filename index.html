@@ -12806,6 +12806,70 @@ document.addEventListener('click', function(e){
   document.head.appendChild(st);
 })();
 try { if (G) { mNavState(); } } catch (e) {}
+
+// ===== v7.34 (2026-11-25) 交配の選び方（ご主人「母→父→交配→自動でリセット→母…と選べる方がいい」） =====
+// - 交配の画面を開いたときは何も選ばず「① 母」から（前は咲いている株を勝手に母・父に入れていた）
+// - 母を選ぶ → 自動で「② 父」へ → 父を選ぶと「③ 受粉させる」が光る → 受粉したら母・父を外して「① 母」へ戻る
+// - 選んである株をもう一度押すと外れる。もう受粉できない株（果実3つ・今週受粉済み）は母に選べず、理由を出す
+// - 受粉のあと「同じ父で続ける」: 父はそのままで次の母を選ぶだけで受粉できる（1株の花粉を何株にもつけたいとき）
+UI.xLastDad = null;
+var _showCrossX = showCross;
+showCross = function(keep){
+  if (UI.view !== 'cross' && !UI._xInner) { UI.mom = null; UI.dad = null; UI.xside = 'mom'; UI.crossMsg = ''; UI.xLastDad = null; }
+  if (UI._xReset) { UI._xReset = 0; UI.mom = null; UI.dad = null; UI.xside = 'mom'; }
+  var om = openModal, vs = viewShow, html = null, mode = null, args = null;
+  openModal = function(h){ html = h; mode = 'm'; };
+  viewShow = function(v, h, k, nb){ html = h; mode = 'v'; args = [v, k, nb]; };
+  UI._xInner = 1;
+  try { _showCrossX(keep); } finally { openModal = om; viewShow = vs; UI._xInner = 0; }
+  if (html == null) return;
+  if (bloomingPlants().length) html = xflowDecorate(html);
+  if (mode === 'v') viewShow(args[0], html, args[1], args[2]); else openModal(html);
+};
+function xflowDecorate(h){
+  var st = UI.mom && UI.dad ? 3 : UI.mom ? 2 : 1;
+  var step = function(n, t){ return '<span class="xstp' + (st === n ? ' on' : st > n ? ' done' : '') + '">' + (st > n ? '✓' : ['', '①', '②', '③'][n]) + ' ' + t + '</span>'; };
+  var bar = '<div class="xsteps">' + step(1, '母を選ぶ') + '<i>›</i>' + step(2, '父を選ぶ') + '<i>›</i>' + step(3, '受粉させる') + '</div>';
+  h = h.replace('<div class="xtop">', '<div class="xtop">' + bar);
+  if (st === 1) h = h.replace(/<div class="why">母（種をとる株）と父（花粉をとる株）を選んでください。<\/div>/, '');
+  if (st === 3) h = h.replace('<button class="pink" data-act="docross">', '<button class="pink xgo" data-act="docross">');
+  if (UI.xLastDad && G.plants[UI.xLastDad] && G.plants[UI.xLastDad].stage === 5 && !UI.dad && !UI.mom)
+    h = h.replace('<div class="xhead">', '<div class="xkeep"><button data-act="xkeepdad">🔁 父「' + esc(G.plants[UI.xLastDad].name) + '」のまま、次の母を選ぶ</button></div><div class="xhead">');
+  return h;
+}
+function xMomBlock(p){
+  if (!p) return '';
+  if (p.fruits.length >= 3) return '「' + p.name + '」には' + (isHel(p) || isTl(p) ? 'さや' : '果実') + 'がもう3つついています（1株3つまで）';
+  if (p.crossW === G.week) return '「' + p.name + '」の今週の花はもう受粉させました。来週また咲きます';
+  return '';
+}
+var _doCrossX = doCross;
+doCross = function(m, d){
+  var r = _doCrossX(m, d);
+  if (r && r.ok && !G._sim) { UI._xReset = 1; UI.xLastDad = d; }
+  return r;
+};
+document.addEventListener('click', function(e){
+  var el = e.target.closest && e.target.closest('[data-act]'); if (!el) return;
+  var a = el.dataset.act;
+  if (a === 'pickx') {
+    var id = el.dataset.id, p = G.plants[id];
+    if (UI.xside === 'mom' && UI.mom === id) { e.stopPropagation(); UI.mom = null; UI.crossMsg = ''; showCross(true); return; }
+    if (UI.xside === 'dad' && UI.dad === id) { e.stopPropagation(); UI.dad = null; UI.crossMsg = ''; showCross(true); return; }
+    if (UI.xside === 'mom') { var why = xMomBlock(p); if (why) { e.stopPropagation(); toast(why); return; } }
+    UI.xLastDad = UI.xside === 'dad' ? null : UI.xLastDad;
+  }
+  else if (a === 'xkeepdad') { e.stopPropagation(); UI.dad = UI.xLastDad; UI.xLastDad = null; UI.xside = 'mom'; UI.crossMsg = ''; showCross(true); }
+}, true);
+(function(){
+  var st = document.createElement('style');
+  st.textContent =
+    '.xsteps{display:flex;align-items:center;gap:4px;flex-wrap:wrap;margin:0 0 6px;font-size:12px}.xsteps i{font-style:normal;color:#c9bea6}' +
+    '.xstp{padding:2px 9px;border-radius:10px;background:#f3ede0;color:#9a8c70}.xstp.on{background:#c0548a;color:#fff;font-weight:700}.xstp.done{background:#e6f0dc;color:#4f7a3a}' +
+    '.xgo{animation:xgo 1.2s ease-in-out infinite;box-shadow:0 0 0 0 rgba(192,84,138,.5)}@keyframes xgo{0%,100%{box-shadow:0 0 0 0 rgba(192,84,138,.45)}50%{box-shadow:0 0 0 7px rgba(192,84,138,0)}}' +
+    '.xkeep{margin:6px 0 2px}.xkeep button{font-size:12px;padding:4px 10px}';
+  document.head.appendChild(st);
+})();
 </script>
 <script>
 // ホーム画面版: オフラインで起動できるようにする＋セーブを消されにくくする
