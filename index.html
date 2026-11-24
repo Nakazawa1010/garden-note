@@ -12870,6 +12870,112 @@ document.addEventListener('click', function(e){
     '.xkeep{margin:6px 0 2px}.xkeep button{font-size:12px;padding:4px 10px}';
   document.head.appendChild(st);
 })();
+
+// ===== v7.35 (2026-11-25) 交配の追加（ご主人「1と3はいい。誤操作がないように」） =====
+// 1. 鉢から交配: 咲いている株のカードに「💐 この株を母に」。押すと母が入った状態で交配の画面へ（受粉は画面で③を押すまでしない）
+// 3. まとめて交配: 父を1株 → 母にする株にチェック → 「N株に受粉させる」→ 確かめの欄でもう一度「受粉させる」。受粉できない株はチェックできない
+var _renderPotX = renderPot;
+renderPot = function(i){
+  var h = _renderPotX(i), p = potPlant(i);
+  if (!p || p.stage !== 5) return h;
+  var k = 'data-act="detail" data-id="' + p.id + '">詳しく</button>', j = h.indexOf(k);
+  if (j < 0) return h;
+  return h.slice(0, j + k.length) + '<button class="pink xasmom" data-act="xasmom" data-id="' + p.id + '" title="この株を母（種をとる株）にして交配の画面を開きます">💐 この株を母に</button>' + h.slice(j + k.length);
+};
+var _showCrossX2 = showCross;
+showCross = function(keep){
+  var fresh = UI.view !== 'cross' && !UI._xInner;
+  if (fresh) { UI.bDad = null; UI.bMoms = []; UI.bConfirm = 0; UI.xBatch = false; }
+  if (fresh && UI._xPreMom) {
+    var id = UI._xPreMom; UI._xPreMom = null;
+    _showCrossX2(keep);
+    if (G.plants[id] && G.plants[id].stage === 5) { UI.mom = id; UI.xside = 'dad'; UI.dad = null; }
+    return _showCrossX2(true);
+  }
+  if (UI.xBatch && bloomingPlants().length) { viewShow('cross', xBatchHTML(), keep || UI.view === 'cross'); return; }
+  return _showCrossX2(keep);
+};
+var _xflowDecorateB = xflowDecorate;
+xflowDecorate = function(h){
+  h = _xflowDecorateB(h);
+  var m = '<div class="xmode"><button class="on" disabled>1株ずつ</button><button data-act="xbatch" data-v="1">👥 まとめて交配</button></div>';
+  return h.replace('<div class="xtop">', m + '<div class="xtop">');
+};
+function xBatchHTML(){
+  var bl = bloomingPlants(), dad = UI.bDad && G.plants[UI.bDad];
+  if (UI.bDad && (!dad || dad.stage !== 5)) { UI.bDad = null; dad = null; }
+  UI.bMoms = (UI.bMoms || []).filter(function(id){ var q = G.plants[id]; return q && q.stage === 5 && !xMomBlock(q) && dad && spOf(q) === spOf(dad); });
+  var st = !dad ? 1 : !UI.bMoms.length ? 2 : 3;
+  var step = function(n, t){ return '<span class="xstp' + (st === n ? ' on' : st > n ? ' done' : '') + '">' + (st > n ? '✓' : ['', '①', '②', '③'][n]) + ' ' + t + '</span>'; };
+  var o = '<h3>' + icImg('cross', 'ic m') + ' 交配 <span class="small">まとめて</span></h3>';
+  o += '<div class="xmode"><button data-act="xbatch" data-v="0">1株ずつ</button><button class="on" disabled>👥 まとめて交配</button></div>';
+  o += '<div class="xtop"><div class="xsteps">' + step(1, '父を選ぶ') + '<i>›</i>' + step(2, '母にチェック') + '<i>›</i>' + step(3, 'まとめて受粉') + '</div>';
+  o += '<div class="xpair"><div class="xslot' + (!dad ? ' on' : '') + '" data-act="xbdad" data-id=""><div class="xsl">父（花粉をとる）</div>' + (dad ? drawFlower(phen(dad), { px: 56 }) + '<b>' + esc(dad.name) + '</b><span class="small">押すと選び直し</span>' : '<div class="xnone">下から選ぶ</div>') + '</div>' +
+    '<div class="xx">→</div><div class="xslot' + (dad ? ' on' : '') + '"><div class="xsl">母（種をとる）</div><div class="xnone" style="height:auto;min-height:56px;flex-direction:column"><b style="font-size:22px">' + UI.bMoms.length + '株</b><span class="small">' + (dad ? '下でチェック' : '父を先に') + '</span></div></div></div>';
+  o += '<div class="xact">';
+  if (UI.crossMsg) o += '<div class="okmsg">' + esc(UI.crossMsg) + '</div>';
+  if (UI.bConfirm && st === 3) {
+    o += '<div class="xconf">父「' + esc(dad.name) + '」の花粉を、母 ' + UI.bMoms.length + '株（' + UI.bMoms.map(function(id){ return esc(G.plants[id].name); }).join('、') + '）につけます。よろしいですか？' +
+      '<div class="cbtns"><button data-act="xbno">やめる</button><button class="pink" data-act="xbgo">受粉させる</button></div></div>';
+  } else {
+    o += '<div class="small">' + (st === 1 ? '父にする株を1つ選んでください。' : st === 2 ? '母にする株にチェックを入れてください（何株でも）。' : '父「' + esc(dad.name) + '」の花粉を ' + UI.bMoms.length + '株につけます。') + '</div>';
+    o += '<button class="pink' + (st === 3 ? ' xgo' : '') + '" data-act="xbask"' + (st === 3 ? '' : ' disabled') + '>' + (st === 3 ? UI.bMoms.length + '株に受粉させる' : '受粉させる') + '</button>';
+  }
+  o += '</div></div>';
+  var list = dad ? bl.filter(function(q){ return spOf(q) === spOf(dad); }) : bl;
+  if (dad) {
+    var ok = list.filter(function(q){ return !xMomBlock(q) && q.id !== dad.id; });
+    o += '<div class="xhead"><b>母にする株にチェック</b> <span class="small">父と同じ植物 ' + list.length + '株</span>' + (ok.length ? ' <button class="xall" data-act="xball">' + (UI.bMoms.length >= ok.length ? 'チェックを全部外す' : '父以外の受粉できる株を全部チェック（' + ok.length + '）') + '</button>' : '') + '</div>';
+  } else o += '<div class="xhead"><b>父にする株を選ぶ</b> <span class="small">咲いている ' + list.length + '株</span></div>';
+  o += '<div class="xgrid">' + list.map(function(q){
+    var why = dad ? xMomBlock(q) : '', on = dad ? UI.bMoms.indexOf(q.id) >= 0 : false, isD = dad && dad.id === q.id;
+    return '<div class="xit' + (on ? ' on' : '') + (why ? ' full' : '') + '" data-act="' + (dad ? 'xbmom' : 'xbdad') + '" data-id="' + q.id + '">' + (dad ? '<span class="xck">' + (on ? '☑' : '☐') + '</span>' : '') + drawFlower(phen(q), { px: 44 }) + '<span class="xt"><b>' + esc(q.name) + '</b><span class="small">' + traitText(phen(q)).color + '</span><span class="small">' + (why ? (q.crossW === G.week ? '今週は受粉済み' : '果実が満杯') : isD ? '父（自家受粉になる）' : '果実 ' + q.fruits.length + '/3') + '</span></span>' + (isD ? '<i class="xd">父</i>' : '') + '</div>';
+  }).join('') + '</div>';
+  return o;
+}
+document.addEventListener('click', function(e){
+  var el = e.target.closest && e.target.closest('[data-act]'); if (!el) return;
+  var a = el.dataset.act, id = el.dataset.id;
+  if (a === 'xasmom') {
+    e.stopPropagation(); var p = G.plants[id], why = xMomBlock(p);
+    if (why) { toast(why + '。交配の画面で別の株を選べます'); }
+    if (!$('modal').hidden) closeModal();
+    UI._xPreMom = why ? null : id; showCross(); return;
+  }
+  if (a === 'xbatch') { e.stopPropagation(); UI.xBatch = el.dataset.v === '1'; UI.crossMsg = ''; UI.bDad = null; UI.bMoms = []; UI.bConfirm = 0; UI.mom = UI.dad = null; UI.xside = 'mom'; showCross(true); return; }
+  if (a === 'xbdad') { e.stopPropagation(); UI.bDad = id && UI.bDad !== id ? id : null; UI.bMoms = []; UI.bConfirm = 0; UI.crossMsg = ''; showCross(true); return; }
+  if (a === 'xbmom') {
+    e.stopPropagation(); var q = G.plants[id], w = xMomBlock(q);
+    if (w) { toast(w); return; }
+    var k = UI.bMoms.indexOf(id); if (k >= 0) UI.bMoms.splice(k, 1); else UI.bMoms.push(id);
+    UI.bConfirm = 0; UI.crossMsg = ''; showCross(true); return;
+  }
+  if (a === 'xball') {
+    e.stopPropagation(); var d = G.plants[UI.bDad];
+    var ok = bloomingPlants().filter(function(q){ return spOf(q) === spOf(d) && !xMomBlock(q) && q.id !== d.id; }).map(function(q){ return q.id; });
+    UI.bMoms = UI.bMoms.length >= ok.length ? [] : ok; UI.bConfirm = 0; showCross(true); return;
+  }
+  if (a === 'xbask') { e.stopPropagation(); if (UI.bMoms.length && UI.bDad) { UI.bConfirm = 1; showCross(true); } return; }
+  if (a === 'xbno') { e.stopPropagation(); UI.bConfirm = 0; showCross(true); return; }
+  if (a === 'xbgo') {
+    e.stopPropagation(); if (!UI.bConfirm || !UI.bDad) return;
+    var dn = G.plants[UI.bDad].name, n = 0, ng = [];
+    UI.bMoms.slice().forEach(function(m){ var r = doCross(m, UI.bDad); if (r && r.ok) n++; else ng.push(G.plants[m].name); });
+    UI._xReset = 0; UI.xLastDad = null;
+    UI.bDad = null; UI.bMoms = []; UI.bConfirm = 0;
+    UI.crossMsg = '父「' + dn + '」の花粉を ' + n + '株に受粉させました。' + (ng.length ? '（' + ng.join('、') + ' はできませんでした）' : '') ;
+    save(); render(); showCross(true); return;
+  }
+}, true);
+(function(){
+  var st = document.createElement('style');
+  st.textContent =
+    '.xmode{display:inline-flex;gap:0;margin:0 0 6px;border:1px solid var(--line);border-radius:10px;overflow:hidden}.xmode button{border:0;border-radius:0;padding:4px 12px;font-size:12px;background:#fff}.xmode button.on{background:#c0548a;color:#fff;opacity:1}' +
+    '.xconf{flex:1 1 100%;padding:8px 10px;border:1px solid #e0b3c8;background:#fff4f8;border-radius:10px;font-size:13px}.xconf .cbtns{display:flex;gap:8px;justify-content:flex-end;margin-top:6px}' +
+    '.xck{font-size:18px;color:#c0548a;width:18px;text-align:center}.xall{font-size:11px;padding:2px 8px;margin-left:6px}' +
+    '.acts .xasmom{white-space:nowrap}';
+  document.head.appendChild(st);
+})();
 </script>
 <script>
 // ホーム画面版: オフラインで起動できるようにする＋セーブを消されにくくする
