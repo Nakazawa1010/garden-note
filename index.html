@@ -12666,7 +12666,7 @@ function lukaFreeStart(rid, wish){
   var wk = Math.max(1, Math.ceil(r.wk / 2));
   var e = { id: 'e' + (G.week * 10 + G.exped.length), region: rid, adv: 'luka', wish: wish || '', start: G.week, back: G.week + wk, fee: 0, done: false, sana: true };
   G.exped.unshift(e); if (G.exped.length > 12) G.exped.length = 12;
-  G.lukaFree = (G.lukaFree || 0) + 1; G.sanaAway = e.back;
+  G.lukaFree = (G.lukaFree || 0) + 1; G.sanaAway = e.back; G.awayWhy = 'luka';
   G.stat = G.stat || {}; G.stat.lukaGo = (G.stat.lukaGo || 0) + 1;
   try { frAdd('luka', 1, 'いっしょに採取'); } catch (x) {}
   G.log.unshift({ w: G.week, t: '🧒 ルカといっしょに「' + r.n + '」へ出かけた（' + weekLabel(e.back) + 'まで庭を留守にする）' });
@@ -12690,10 +12690,10 @@ window.addEventListener('click', function(e){
   if (!sanaAway()) return;
   var el = e.target.closest && e.target.closest('[data-act]'); if (!el || !AWAY_ACTS.test(el.dataset.act)) return;
   e.stopPropagation(); e.preventDefault();
-  toast('サナはルカと採取に出かけています。' + weekLabel(G.sanaAway) + 'に帰るまで、庭の世話はできません');
+  toast((G.awayWhy === 'shop' ? 'サナはミドリ亭を手伝っています。' : 'サナはルカと採取に出かけています。') + weekLabel(G.sanaAway) + 'に帰るまで、庭の世話はできません');
 }, true);
 var _hintsLuka = hints;
-hints = function(){ var h = _hintsLuka.apply(this, arguments); if (sanaAway()) h.unshift('🧒 サナはルカと採取に出かけています（' + weekLabel(G.sanaAway) + 'に帰ります）。その間は庭の世話ができません。水やりと肥料は出かける前の設定のままです。'); return h; };
+hints = function(){ var h = _hintsLuka.apply(this, arguments); if (sanaAway()) h.unshift(G.awayWhy === 'shop' ? '🏪 サナはミドリ亭の手伝いに出ています（' + weekLabel(G.sanaAway) + 'まで）。その間は庭の世話ができません。水やりと肥料は出かける前の設定のままです。' : '🧒 サナはルカと採取に出かけています（' + weekLabel(G.sanaAway) + 'に帰ります）。その間は庭の世話ができません。水やりと肥料は出かける前の設定のままです。'); return h; };
 // 「依頼する」を押したとき、ルカでお金が足りなければ相談の場面へ
 window.addEventListener('click', function(e){
   var el = e.target.closest && e.target.closest('[data-act=exgo],[data-act=lukago],[data-act=lukano]'); if (!el) return;
@@ -12726,6 +12726,68 @@ window.addEventListener('click', function(e){
   var L = [['luka', 'え、お金が足りないの？ ……本当はダメなんだよ？'], ['luka', 'でも、サナの頼みだもんなあ。'], ['luka', 'そうだ！ サナもいっしょに来てよ。ふたりで探せば早いし、きっと見つかるよ！'], ['', '（お金はいらない。そのかわりサナも出かけるので、' + wk + '週のあいだ庭の世話ができない）']];
   openModal('<h3>🧒 ルカに頼む</h3>' + L.map(function(l){ return '<p>' + (l[0] === 'luka' ? '<b>ルカ</b>「' + esc(l[1]) + '」' : '<span class="small">' + esc(l[1]) + '</span>') + '</p>'; }).join('') +
     '<div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap"><button data-act="lukano">やめておく</button><button class="pri" data-act="lukago">いっしょに行く（' + wk + '週）</button></div>');
+}, true);
+
+// ===== v7.37 お金がないときの救済（ご主人「1と2があれば良い」2026-11-25） =====
+// 1 詰み防止: 育てている株・種・お金がすべて尽きたら、ミドラが「チセさんのツケで」アサガオの種を3粒くれる（4週に1回まで）。
+// 2 ミドリ亭の手伝い: 所持金が少ないとき（1000フロル未満）、1週お店を手伝って手間賃100〜200フロル＋売れ残りのアサガオの種2粒。その週は庭の世話ができない（ルカと同じ留守の仕組み）。
+//   ご主人「お金と種をもらえるように。ただし基本はプレイヤーがあまり選ばないものに」→ 種袋1つ(300)より安い見返りにして、ふだんは損になるようにしてある。
+// 保存: G.tsukeW = 最後にツケで種をもらった週、G.tsukeN = 回数、G.helpPay = 手伝いの手間賃（帰ってきた週に払う）、G.helpN = 回数、G.awayWhy = 'shop' | 'luka'
+var RELIEF_SEED_LINE = 300, RELIEF_GAP = 4, HELP_LINE = 1000;
+function reliefStuck(){
+  if (!G || G.money >= RELIEF_SEED_LINE) return false;
+  if (livingPlants().some(function(p){ return p.stage < 7; })) return false;
+  if ((G.packets || []).some(function(k){ return k.seeds && k.seeds.length; })) return false;
+  if ((G.exped || []).some(function(e){ return !e.done; })) return false;
+  return true;
+}
+function reliefTick(notes){
+  if (G.helpPay && !sanaAway()) {
+    var n = G.helpPay, st = HELP_STRAINS[G.week % 3]; G.helpPay = 0; earn(n, 'ミドリ亭の手伝い');
+    newPacketFrom(st[1], 'asa', [0, 1].map(function(){ return strainGenome(st[0]); }), 'ミドリ亭の手伝いでもらった売れ残りの種。');
+    try { frAdd('okami', 1, 'お店の手伝い'); } catch (x) {}
+    notes.push('🏪 ミドリ亭の手伝いから帰ってきた。手間賃 ' + yen(n) + ' と、売れ残りの「' + st[1] + '」の種を2粒もらった。庭の世話がまたできる。');
+  }
+  if (reliefStuck() && (G.tsukeW == null || G.week - G.tsukeW >= RELIEF_GAP)) {
+    newPacketFrom('蒼天', 'asa', [0, 1, 2].map(function(){ return strainGenome('souten'); }), 'ミドラがチセさんのツケで分けてくれた種。澄んだ青に白い覆輪。');
+    G.tsukeW = G.week; G.tsukeN = (G.tsukeN || 0) + 1;
+    G.log.unshift({ w: G.week, t: '🌱 ミドラが「チセさんのツケで」アサガオの種を3粒分けてくれた' });
+    notes.push('🌱 ミドラ「庭が空っぽじゃないか。ほら、チセさんのツケにしとくよ」――蒼天の種を3粒もらった。');
+  }
+}
+var _questTickRelief = questTick;
+questTick = function(notes){ _questTickRelief(notes); try { reliefTick(notes); } catch (e) {} };
+// 始めたばかり・古いセーブで、今もう詰んでいたらその場で渡す
+var _renderRelief = render;
+render = function(){
+  if (G && !G._sim && reliefStuck() && G.tsukeW == null) { var ns = []; reliefTick(ns); if (ns.length) setTimeout(function(){ toast(ns[0]); }, 600); save(); }
+  return _renderRelief.apply(this, arguments);
+};
+function helpPayFor(w){ return 100 + ((w * 37) % 11) * 10; }
+var HELP_STRAINS = [['souten', '蒼天'], ['momogasumi', '桃霞'], ['koubai', '紅采']];
+function helpOk(){ return G.money < HELP_LINE && !sanaAway() && !G.helpPay; }
+function helpBox(){
+  if (G.money >= HELP_LINE && !sanaAway()) return '';
+  if (sanaAway()) return '<div class="cbox" style="margin-bottom:8px">🏪 ' + (G.awayWhy === 'shop' ? 'いまはミドリ亭を手伝っています（' + weekLabel(G.sanaAway) + 'まで）。' : 'サナは出かけています。') + '</div>';
+  return '<div class="cbox" style="margin-bottom:8px">🏪 <b>お店を手伝う</b>　<span class="small">1週ミドリ亭を手伝って、手間賃100〜200フロルと売れ残りの種を2粒もらいます。その週は庭の世話ができません（所持金が' + yen(HELP_LINE) + '未満のとき）。</span><br><button class="pri" data-act="helpgo">1週手伝う</button></div>';
+}
+var _showShopRelief = showShop;
+showShop = function(){
+  var r = _showShopRelief.apply(this, arguments), hb = helpBox();
+  var t = hb && (document.querySelector('#vshop .tabs') || document.querySelector('#mbox .tabs'));
+  if (t && !t.parentNode.querySelector('.helpbox')) t.insertAdjacentHTML('beforebegin', hb.replace('class="cbox"', 'class="cbox helpbox"'));
+  return r;
+};
+window.addEventListener('click', function(e){
+  var el = e.target.closest && e.target.closest('[data-act=helpgo]'); if (!el) return;
+  e.stopPropagation(); e.preventDefault();
+  if (!helpOk()) { toast('今は手伝えません'); return; }
+  var pay = helpPayFor(G.week);
+  G.sanaAway = G.week + 1; G.awayWhy = 'shop'; G.helpPay = pay; G.helpN = (G.helpN || 0) + 1;
+  G.log.unshift({ w: G.week, t: '🏪 ミドリ亭を1週手伝うことにした（' + weekLabel(G.sanaAway) + 'まで庭を留守にする）' });
+  save();
+  var first = G.helpN === 1;
+  playTalk('ミドリ亭の手伝い', (first ? [['okami', 'お金が心細いのかい？ じゃあ、うちを手伝っておくれ。'], ['okami', 'チセさんも若いころ、ここで鉢を並べてたもんさ。']] : [['okami', 'おや、また来てくれたのかい。助かるよ。']]).concat([['sana', 'がんばります！ ……鉢のみんな、1週間待っててね。'], ['', '1週のあいだ、庭の世話はできない。次の週に手間賃と売れ残りの種をもらえる。']]), function(){ closeModal(); render(); }, 'はじめる');
 }, true);
 
 // ===== 一枚絵・画像の部品（Codex で生成。devtools/imgin.js で取り込む。直接いじらない） =====
