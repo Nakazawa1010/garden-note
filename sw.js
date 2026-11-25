@@ -1,6 +1,6 @@
 // ガーデンノート オフライン用。一度開けば通信なしで起動する。
 // 起動はいつも端末の控えから。裏で新しい版があれば取り込み、次に開いたときから新しい版になる。
-const CACHE = 'garden-note-v8';
+const CACHE = 'garden-note-v9';
 const FILES = ['./', './index.html', './manifest.webmanifest', './apple-touch-icon.png', './icon-192.png', './icon-512.png', './icon-maskable-512.png'];
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES.map(f => new Request(f, {cache: 'reload'})))).then(() => self.skipWaiting()));

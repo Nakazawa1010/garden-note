@@ -2680,7 +2680,7 @@ hints = function(){
   return h;
 };
 var _qtP = questTick; questTick = function(notes){ _qtP(notes); pVolunteer(notes); };
-var _svP = seedValue; seedValue = function(k){ if (k.sp !== 'pz') return _svP(k); if (!k.seeds.length) return 0; var sum = 0; k.seeds.forEach(function(g){ sum += 35 * (1 + 0.6 * (g.m || []).length) * (1 + 0.15 * ((k.gen || 1) - 1)) * (pColorName(g) === 'ブラック' ? 2 : 1); }); return Math.round(sum * seedVigor(k) * 0.85 / 10) * 10; };
+var _svP = seedValue; seedValue = function(k){ if (k.sp !== 'pz') return _svP(k); if (!k.seeds.length) return 0; var sum = 0; k.seeds.forEach(function(g){ sum += 35 * (1 + 0.6 * (g.m || []).length) * (1 + 0.15 * ((k.gen || 1) - 1)) * (pColorName(g) === 'ブラック' ? 2 : 1); }); return Math.round(sum * seedVigor(k) / 10) * 10; }; // v7.38 ×0.85 は shop2.js でまとめて掛かるので、ここでは掛けない（2重になっていた）
 var _npfP = newPacketFrom;
 newPacketFrom = function(name, sp, seeds, desc, extra){ var pk = _npfP(name, sp === 'pz' ? 'asa' : sp, seeds, desc, extra); if (sp === 'pz') { pk.sp = 'pz'; pk.iconPh = pPhen({ g: seeds[0], id: pk.id, health: 100 }); } return pk; };
 var _newGameP = newGame; newGame = function(seed){ var r = _newGameP(seed); pSetup(); return r; };
@@ -3010,7 +3010,7 @@ hints = function(){
   if (dr) h.push('💧 「' + dr.name + '」は水が大好き。「控えめ」だと夏に乾いて弱ります。');
   return h;
 };
-var _svA = seedValue; seedValue = function(k){ if (k.sp !== 'aj') return _svA(k); if (!k.seeds.length) return 0; var sum = 0; k.seeds.forEach(function(g){ sum += (k.cut ? 220 : 60) * (1 + 0.6 * (g.m || []).length) * (1 + 0.15 * ((k.gen || 1) - 1)) * ((!g.sg[0] && !g.sg[1]) ? 1.4 : 1); }); return Math.round(sum * (k.cut ? 1 : seedVigor(k)) * 0.85 / 10) * 10; };
+var _svA = seedValue; seedValue = function(k){ if (k.sp !== 'aj') return _svA(k); if (!k.seeds.length) return 0; var sum = 0; k.seeds.forEach(function(g){ sum += (k.cut ? 220 : 60) * (1 + 0.6 * (g.m || []).length) * (1 + 0.15 * ((k.gen || 1) - 1)) * ((!g.sg[0] && !g.sg[1]) ? 1.4 : 1); }); return Math.round(sum * (k.cut ? 1 : seedVigor(k)) / 10) * 10; }; // v7.38 ×0.85 は shop2.js でまとめて掛かるので、ここでは掛けない（2重になっていた）
 var _npfA = newPacketFrom;
 newPacketFrom = function(name, sp, seeds, desc, extra){ var pk = _npfA(name, sp === 'aj' ? 'asa' : sp, seeds, desc, extra); if (sp === 'aj') { pk.sp = 'aj'; if (extra && extra.cut) { pk.cut = true; pk.gp0 = 14; } pk.iconPh = ajPhen({ g: seeds[0], id: pk.id, health: 100, stage: 0, ph: 6 }); } return pk; };
 var _newGameA = newGame; newGame = function(seed){ var r = _newGameA(seed); ajSetup(); return r; };
@@ -7924,7 +7924,7 @@ function stageTag(p){
   var cls = p.stage === 5 ? 'bl' : p.stage === 7 ? 'dd' : 'st';
   return '<span class="tag ' + cls + '">' + stName(p) + '</span>';
 }
-function mutTags(p){ return p.seen.length ? '<span class="tag m" title="' + esc(p.seen.map(function(k){ return MUTS[k].n + '：' + MUTS[k].d; }).join('\n')) + '">変異: ' + p.seen.map(function(k){ return MUTS[k].n; }).join(' / ') + '</span>' : ''; }
+function mutTags(p){ return p.seen.length ? '<span class="tag m" title="' + esc(p.seen.map(function(k){ return MUTS[k].n + '：' + MUTS[k].d; }).join('\n')) + '">変異: ' + p.seen.map(function(k){ return MUTS[k].n + (typeof rarStar === 'function' ? rarStar(k) : ''); }).join(' / ') + '</span>' : ''; }
 function progText(p){
   if (isCm(p)) return cmProg(p);
   if (isKk(p)) return kkProg(p);
@@ -8145,7 +8145,7 @@ function showDetail(id){
     else if (isPz(p)) o += '<tr><th>花径</th><td>' + t.size + '</td></tr>';
     else o += '<tr><th>花径</th><td>' + t.size + '（生まれつき: ' + sizeWord(sizeGene(p.g)) + '／世話の影響 ' + (p.sizeF >= 1.01 ? '+' : '') + Math.round((p.sizeF - 1) * 100) + '%）</td></tr>';
   } else o += '<tr><th>花</th><td class="small">咲くまで分かりません。' + (p.stage === 4 ? 'つぼみの先に色がのぞいてきました。' : '') + '</td></tr>';
-  o += '<tr><th>変異</th><td>' + (p.seen.length ? p.seen.map(function(k){ return '<span class="tag m">' + MUTS[k].n + '</span>' + (MUTS[k].t ? ' <span class="small">（' + MUTS[k].t + '）</span>' : '') + ' ' + esc(MUTS[k].d); }).join('<br>') : '<span class="small">見つかっていません' + (p.stage < 5 ? '（咲くと分かるものもあります）' : '') + '</span>') + '</td></tr>';
+  o += '<tr><th>変異</th><td>' + (p.seen.length ? p.seen.map(function(k){ return '<span class="tag m">' + MUTS[k].n + (typeof rarStar === 'function' ? rarStar(k) : '') + '</span>' + (MUTS[k].t ? ' <span class="small">（' + MUTS[k].t + '）</span>' : '') + ' ' + esc(MUTS[k].d); }).join('<br>') : '<span class="small">見つかっていません' + (p.stage < 5 ? '（咲くと分かるものもあります）' : '') + '</span>') + '</td></tr>';
   var cmb = typeof seenCombos === 'function' && !isBb(p) ? seenCombos(p) : [];
   if (cmb.length) o += '<tr><th>組み合わせ</th><td>' + cmb.map(function(c){ return '<span class="tag m">' + c.n + '</span> <span class="small">（' + c.t + '）</span> ' + esc(c.d); }).join('<br>') + '</td></tr>';
   if (p.fruits.length) o += '<tr><th>' + (isHel(p) || isTl(p) || isPz(p) ? 'さや' : isBb(p) ? '交配した実' : '果実') + '</th><td>' + p.fruits.map(function(f){ return (f.self ? '自家受粉' : '父 ' + esc(f.dadName)) + '：' + (f.ripe ? '熟した' : 'あと' + Math.ceil(f.left) + '週'); }).join('<br>') + '</td></tr>';
@@ -8843,7 +8843,7 @@ showShop = function(){
   if (UI.shopTab === '庭づくり' && typeof gardenShopHTML === 'function') { o += gardenShopHTML(); openModal(o); $('mbox').classList.add('mfix'); return; }
   if (UI.shopTab === '売る') {
     var list = G.packets.filter(function(k){ return k.seeds.length; });
-    o += '<p class="small">種袋を丸ごと売ります。世代が進んだ種や、変異を受け継いだ種、種間交雑の種は高く売れます。古い種は安くなります。</p>';
+    o += '<p class="small">種袋を丸ごと売ります。値段は袋に書いてあることで決まります（親の花・親が見せていた変異・粒の数・古さ）。咲くまで分からない新しい変異は値段に入りません。珍しい変異（★★・★★★）を両親がそろって持つ種や、近ごろ品評会で入賞した株の種は高く売れます。</p>';
     o += list.length ? list.map(function(k){ var v = seedValue(k); return '<div class="shopit"><div class="ic">' + miniFlower(k.iconPh || k.momPh, 40) + '</div><div class="tx"><b>' + esc(k.label) + '</b><br><span class="small">' + k.seeds.length + (k.bulb ? '球' : '粒') + '・第' + k.gen + '世代・' + vigorWord(seedVigor(k)) + '</span></div><div class="pr">' + yen(v) + '</div><button data-act="sell" data-pk="' + k.id + '">売る</button></div>'; }).join('') : '<p>売れる種袋がありません。</p>';
     openModal(o); $('mbox').classList.add('mfix'); return;
   }
@@ -13117,6 +13117,161 @@ document.addEventListener('click', function(e){
     '.acts .xasmom{white-space:nowrap}';
   document.head.appendChild(st);
 })();
+
+// ===== v7.38 変異のレア度・種の売値の見直し・受賞の値打ちは年とともに薄れる（ご主人 2026-11-25） =====
+// きっかけ: 普通の交配の袋の売値を見比べると、高い袋＝隠れた変異入りと分かってしまい、変異探しが楽すぎた。
+// 1 変異にレア度（ふつう★・珍しい★★・稀★★★・幻）。新しく出る確率と、売値の重みがレア度で変わる。
+// 2 種の売値は「袋に書いてある情報」だけで決める: 親の見た目（母株の形質）・親が見せていた変異の受け継ぎ見込み・粒の数・古さ。
+//   新しく出た変異は咲くまでだれにも分からないので数えない。世代の上乗せはやめた（株の鑑定 v7.19 とそろえる）。
+// 3 受賞の値打ち（種も株も）は、受賞した年がいちばん高く、3年かけて消える。「過去の栄光にすがってはダメ」
+var MUT_RARITY = {
+  shourin: 1, bansei: 1, tansai: 1, hakanai: 1, kyojaku: 1,
+  taka: 2, hayazaki: 2, kyouken: 2, tainetsu: 2, fuiri: 2, eda: 2, wase: 2, suzunari: 2,
+  tairin: 3, noshoku: 3, retsuben: 3, parrot: 3, ootsubu: 3, amami: 3, nishiki: 3,
+  kirewake: 3, kikagaku: 3, sokusei: 3, kibana: 3
+};
+(typeof FANT_KEYS !== 'undefined' ? FANT_KEYS : []).forEach(function(k){ MUT_RARITY[k] = 4; });
+var RARITY_DEF = {
+  1: { n: 'ふつう', s: '★', rate: 3.0 / 3.5, w: 0.1 },
+  2: { n: '珍しい', s: '★★', rate: 1.2 / 3.5, w: 0.5 },
+  3: { n: '稀', s: '★★★', rate: 0.4 / 3.5, w: 1.5 },
+  4: { n: '幻', s: '✦', rate: 1, w: 3.0 }
+};
+function mutRar(k){ return RARITY_DEF[MUT_RARITY[k] || 2]; }
+function rarStar(k){ var r = mutRar(k); return r ? '<span class="rar r' + (MUT_RARITY[k] || 2) + '" title="レア度: ' + r.n + '">' + r.s + '</span>' : ''; }
+(function(){ var st = document.createElement('style'); st.textContent = '.rar{font-size:11px;margin-left:3px;letter-spacing:-1px;color:#b08a2e}.rar.r1{color:#9a9a9a}.rar.r3{color:#c0642a}.rar.r4{color:#7a5ac8}'; document.head.appendChild(st); })();
+// 不利な変異は売値を少し下げる
+function mutPriceW(k){ return MUTS[k] && MUTS[k].t === '不利' ? -0.1 : mutRar(k).w; }
+
+// ---- 1 出る確率: 自然に出る分と「混ざり合う」交配で新しく出る分を、レア度で絞る ----
+var _mutSetRar = mutSet;
+mutSet = function(g, mg, fg, keys, rr, rate, opt){
+  opt = Object.assign({}, opt || {}); var mul = Object.assign({}, opt.mul || {});
+  keys.forEach(function(k){ if (MUT_RARITY[k] && MUT_RARITY[k] < 4) mul[k] = (mul[k] == null ? 1 : mul[k]) * mutRar(k).rate; });
+  opt.mul = mul;
+  var before = (g.newM || []).slice(), r = _mutSetRar(g, mg, fg, keys, rr, rate, opt);
+  if (g.im === 'mix' && g.newM) {
+    g.newM.slice().forEach(function(k){
+      if (before.indexOf(k) >= 0 || !MUT_RARITY[k] || MUT_RARITY[k] >= 4) return;
+      if (rr() < mutRar(k).rate) return;
+      g.m.splice(g.m.indexOf(k), 1); g.newM.splice(g.newM.indexOf(k), 1);
+    });
+  }
+  return r;
+};
+// 世話の条件で出やすくなる変異も、レア度の分だけ出にくく（倍率そのものは同じ）
+induceApply = function(g, keys){
+  if (!G._ind) return g;
+  var rate = MUT_RATE * (G.mutBoost ? 8 : 1) * diff().mut;
+  Object.keys(G._ind).forEach(function(k){
+    if (keys.indexOf(k) < 0 || !mFree(g, k)) return;
+    if (rnd8() < rate * mutRar(k).rate * (G._ind[k] - 1)) { g.m.push(k); g.newM = g.newM || []; g.newM.push(k); }
+  });
+  return g;
+};
+
+// ---- 3 受賞の値打ち: 受賞から何年たったか ----
+var AWARD_FADE_Y = 3;
+function awardFade(t){ var y = (G.week - (t.w || 0)) / 48; return Math.max(0, 1 - y / AWARD_FADE_Y); }
+// その名前の株の受賞のうち、いま一番効いているもの { x: 倍率の上乗せ(0〜), t: 受賞, f: 残り }
+function awardBest(name, win, place){
+  var best = null;
+  (G.trophies || []).forEach(function(t){
+    if (t.sp || !(t.rank >= 1 && t.rank <= 3) || !name || t.by !== name) return;
+    var f = awardFade(t), x = (t.rank === 1 ? win : place) * f;
+    if (x > 0 && (!best || x > best.x)) best = { x: x, t: t, f: f };
+  });
+  return best;
+}
+function awardYears(t){ var y = Math.floor((G.week - (t.w || 0)) / 48); return y <= 0 ? '今年' : y + '年前'; }
+
+// ---- 2 種の売値 ----
+// 採種のとき、袋に「親の見えていたもの」を書きとめる
+function apOfPlant(p){ return p ? { g: JSON.parse(JSON.stringify(p.g)), seen: (p.seen || []).filter(function(k){ return (p.g.m || []).indexOf(k) >= 0; }), fix: (p.g.mh || []).slice() } : null; }
+var _harvestAp = harvest;
+harvest = function(plantId){
+  var p = G.plants[plantId], ripe = p && p.fruits ? p.fruits.filter(function(f){ return f.ripe; }) : [], mom = apOfPlant(p);
+  var dads = ripe.map(function(f){
+    var dp = f.dad && G.plants[f.dad], g = f.dg || (dp && dp.g) || null;
+    var seen = dp && dp.g ? (dp.seen || []).filter(function(k){ return (g && g.m || []).indexOf(k) >= 0; }) : f.self ? (mom ? mom.seen : []) : (g && g.m || []).slice();
+    return { name: f.dadName, seen: seen, fix: g && g.mh ? g.mh.slice() : [] };
+  });
+  var r = _harvestAp(plantId);
+  if (r && r.ok && r.packets && mom) r.packets.forEach(function(k, i){
+    if (k.ap) return;
+    var d = dads.find(function(x){ return x.name === k.dad; }) || dads[i] || dads[0] || { seen: [], fix: [] };
+    k.ap = { g: mom.g, mm: mom.seen, mf: mom.fix, dm: d.seen, df: d.fix };
+  });
+  return r;
+};
+// 古い袋（v7.37まで）: 母株が残っていればそこから、なければ受け継いだ分（新しく出た変異を除く）の平均で
+function apGuess(k){
+  if (k.ap) return k.ap;
+  var mp = k.mom && Object.values(G.plants).find(function(p){ return p.name === k.mom; }), dp = k.dad && Object.values(G.plants).find(function(p){ return p.name === k.dad; });
+  if (mp && !k.cut) { var a = apOfPlant(mp), b = apOfPlant(dp) || a; return { g: a.g, mm: a.seen, mf: a.fix, dm: b.seen, df: b.fix }; }
+  return null;
+}
+// 1粒に受け継がれる見込みの変異 [{k, p}]
+function apExpect(ap){
+  var all = ap.mm.concat(ap.dm.filter(function(k){ return ap.mm.indexOf(k) < 0; }));
+  return all.map(function(k){
+    var inM = ap.mm.indexOf(k) >= 0, inD = ap.dm.indexOf(k) >= 0;
+    var p = inM && inD ? (ap.mf.indexOf(k) >= 0 && ap.df.indexOf(k) >= 0 ? 0.83 : 0.77) : 0.34;
+    return { k: k, p: p };
+  });
+}
+// 変異の分の倍率（上位3つまで数える）
+function mutFactor(list){
+  var ws = list.map(function(x){ return x.p * mutPriceW(x.k); }).sort(function(a, b){ return b - a; });
+  var pos = ws.filter(function(w){ return w > 0; }).slice(0, 3).reduce(function(s, w){ return s + w; }, 0);
+  var neg = ws.filter(function(w){ return w < 0; }).reduce(function(s, w){ return s + w; }, 0);
+  return Math.max(0.6, 1 + pos + neg);
+}
+var _seedValueOld = seedValue;
+function seedValueD(k){
+  if (!k || !k.seeds || !k.seeds.length) return null;
+  var n = k.seeds.length, ap = apGuess(k), muts, src, parts = [];
+  if (ap) {
+    muts = apExpect(ap); src = ap.g;
+  } else if (k.cut || k.big) {
+    // 挿し木・株分けの苗: 中身は元の株と同じなので、見えている変異をそのまま
+    muts = (k.seeds[0].m || []).filter(function(x){ return !(k.seeds[0].newM || []).length || (k.seeds[0].newM || []).indexOf(x) < 0; }).map(function(x){ return { k: x, p: 1 }; }); src = k.seeds[0];
+  } else {
+    // 店の種・採取・合成など親のいない袋: 説明に書かれた系統の値段（中に隠れた変異は数えない）
+    muts = []; src = k.seeds[0];
+  }
+  var g0 = JSON.parse(JSON.stringify(src)); g0.m = []; g0.mh = []; g0.newM = [];
+  ['kind', 'bkind', 'tk', 'tb', 'vir'].forEach(function(f){ if (k.seeds[0][f] !== undefined && f !== 'tb' && f !== 'vir') g0[f] = k.seeds[0][f]; });
+  var fake = Object.assign({}, k, { gen: 1, seeds: k.seeds.map(function(){ return g0; }) });
+  var base = _seedValueOld(fake), mf = mutFactor(muts);
+  if (mf !== 1) parts.push({ n: '親の変異を受け継ぐ見込み', x: mf });
+  var aw = null;
+  [k.mom, k.dad].forEach(function(nm){ var b = awardBest(nm, 0.3, 0.15); if (b && (!aw || b.x > aw.x)) aw = b; });
+  if (aw) parts.push({ n: (aw.t.rank === 1 ? '優勝' : '入賞') + '株の種（' + awardYears(aw.t) + '）', x: 1 + aw.x });
+  var v = Math.round(base * mf * (aw ? 1 + aw.x : 1) / 10) * 10;
+  return { v: Math.max(n * 10, v), base: base, parts: parts, muts: muts };
+}
+seedValue = function(k){ var d = seedValueD(k); return d ? d.v : 0; };
+
+// ---- 3 株の鑑定の来歴も、受賞から年がたつと薄れる ----
+var _plantAppraiseDOld = plantAppraiseD;
+plantAppraiseD = function(p){
+  var d = _plantAppraiseDOld(p); if (!d) return d;
+  var keep = d.parts.filter(function(x){ return !/^品評会の(優勝|入賞)株$|^入賞株の(子|挿し木)$|^入賞した固定品種$/.test(x.n); });
+  var k = 1; d.parts.forEach(function(x){ if (keep.indexOf(x) < 0) k *= x.x; });
+  if (k === 1) return d;
+  var price = d.v / k, add = [];
+  var own = awardBest(p.name, 0.5, 0.3), clone = p.clone && awardBest(p.clone, 0.3, 0.3), par = !p.clone && [p.mom, p.dad].map(function(nm){ return awardBest(nm, 0.15, 0.15); }).filter(Boolean).sort(function(a, b){ return b.x - a.x; })[0];
+  if (own) add.push({ n: '品評会の' + (own.t.rank === 1 ? '優勝' : '入賞') + '株（' + awardYears(own.t) + '）', x: 1 + own.x });
+  else if (clone) add.push({ n: '入賞株の挿し木（' + awardYears(clone.t) + '）', x: 1 + clone.x });
+  else if (par) add.push({ n: '入賞株の子（' + awardYears(par.t) + '）', x: 1 + par.x });
+  if (d.parts.some(function(x){ return x.n === '入賞した固定品種'; }) && (own || clone)) add.push({ n: '入賞した固定品種', x: 1 + 0.25 * (own || clone).f });
+  var parts = [], j = 0;
+  d.parts.forEach(function(x){ if (keep.indexOf(x) >= 0) parts.push(x); else if (j < add.length) parts.push(add[j++]); });
+  while (j < add.length) parts.push(add[j++]);
+  add.forEach(function(x){ price *= x.x; });
+  return { v: Math.round(price / 10) * 10, base: d.base, parts: parts };
+};
 </script>
 <script>
 // ホーム画面版: オフラインで起動できるようにする＋セーブを消されにくくする
