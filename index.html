@@ -13301,6 +13301,68 @@ plantAppraiseD = function(p){
   // 長押しのメニューも止める（入力欄は除く）
   document.addEventListener('contextmenu', function(e){ var t = e.target; if (!(t.closest && t.closest('input,textarea'))) e.preventDefault(); });
 })();
+
+// ===== v7.40 種の一覧: 親の花の絵を長押ししている間だけ、その親の情報を小窓で出す（PCはマウスを乗せている間）（ご主人 2026-11-26） =====
+// ご主人「押すとウィンドウではなく、今の表示のまま長押ししている間だけ」「今も鉢にいるかはいらない」。一覧の表示は変えない。
+(function(){
+  var st = document.createElement('style');
+  st.textContent = [
+    '#ppop{position:fixed;z-index:9000;pointer-events:none;background:#fffaf0;border:1px solid #d9c59a;border-radius:12px;box-shadow:0 8px 26px rgba(0,0,0,.25);width:min(300px,calc(100vw - 16px));padding:10px 12px;font-size:13px;color:#4a3a22}',
+    '#ppop .pph{display:flex;gap:10px;align-items:center;margin-bottom:4px}#ppop .ppn{font-weight:700;font-size:14px;line-height:1.3}',
+    '#ppop table{width:100%;border-collapse:collapse}#ppop th{text-align:left;white-space:nowrap;color:#8a7350;font-weight:400;padding:2px 8px 2px 0;vertical-align:top;width:4em}#ppop td{padding:2px 0}',
+    '.pk .ic svg{cursor:help}'
+  ].join('\n');
+  document.head.appendChild(st);
+})();
+function ppPlantByName(n){ if (!n) return null; var ps = Object.values(G.plants).filter(function(p){ return p.name === n; }); return ps.find(function(p){ return G.pots.indexOf(p.id) >= 0; }) || ps[ps.length - 1] || null; }
+function ppHTML(k, who){
+  var nm = who === 'dad' ? k.dad : k.mom, ph = who === 'dad' ? k.dadPh : k.momPh, p = ppPlantByName(nm), rows = [];
+  var al = !p && (G.album || []).find(function(a){ return a.name === nm; });
+  var gen = p ? p.gen : al ? al.gen : null;
+  if (ph) { try { var t = traitText(ph); if (t.color) rows.push(['花色', esc(t.color)]); if (t.pat) rows.push(['模様', esc(t.pat)]); if (t.shape) rows.push(['形', esc(t.shape)]); if (t.size) rows.push(['大きさ', esc(t.size)]); } catch (e) {} }
+  var seen = p ? (p.seen || []).filter(function(m){ return (p.g.m || []).indexOf(m) >= 0; }) : (k.ap ? (who === 'dad' ? k.ap.dm : k.ap.mm) : al ? (al.muts || []) : []);
+  var fix = p ? (p.g.mh || []) : (k.ap ? (who === 'dad' ? k.ap.df : k.ap.mf) : []);
+  rows.push(['変異', seen.length ? seen.filter(function(m){ return MUTS[m]; }).map(function(m){ return '<span class="tag m">' + MUTS[m].n + (typeof rarStar === 'function' ? rarStar(m) : '') + '</span>' + (fix.indexOf(m) >= 0 ? '<span class="small">固定</span>' : ''); }).join(' ') : '<span class="small">なし</span>']);
+  if (p && typeof plantVarName === 'function') { var vn = plantVarName(p); if (vn) rows.push(['品種', esc(vn)]); }
+  var tr = (G.trophies || []).filter(function(t){ return t.by === nm && !t.sp && t.rank >= 1 && t.rank <= 3 && (G.week - (t.w || 0)) < 48 * 3; });
+  if (tr.length) rows.push(['受賞', tr.slice(-2).map(function(t){ return esc(t.n) + ' ' + (t.rank === 1 ? '優勝' : t.rank + '位') + '（' + (typeof awardYears === 'function' ? awardYears(t) : weekLabel(t.w)) + '）'; }).join('<br>')]);
+  return '<div class="pph">' + miniFlower(ph, 56) + '<div><div class="small">' + (k.mom === k.dad ? '親（自家受粉）' : who === 'dad' ? '父' : '母') + '</div><div class="ppn">' + esc(nm || '?') + '</div>' + (gen ? '<span class="tag g">第' + gen + '世代</span>' : '') + '</div></div>' +
+    '<table>' + rows.map(function(r){ return '<tr><th>' + r[0] + '</th><td>' + r[1] + '</td></tr>'; }).join('') + '</table>';
+}
+function ppHide(){ var e = document.getElementById('ppop'); if (e) e.remove(); }
+function ppShow(svg){
+  var ic = svg.closest('.pk .ic'), row = ic && ic.closest('.pk'), b = row && row.querySelector('[data-pk]'), k = b && G.packets.find(function(x){ return x.id === b.dataset.pk; });
+  if (!k || !k.mom) return false;
+  var svgs = Array.prototype.slice.call(ic.querySelectorAll('svg')), who = svgs.length > 1 && svgs.indexOf(svg) === svgs.length - 1 && k.mom !== k.dad ? 'dad' : 'mom';
+  ppHide(); var d = document.createElement('div'); d.id = 'ppop'; d.innerHTML = ppHTML(k, who); document.body.appendChild(d);
+  // 指に隠れないよう、絵の上か下の広い方に出す
+  var r = svg.getBoundingClientRect(), h = d.offsetHeight, w = d.offsetWidth, vw = window.innerWidth, vh = window.innerHeight;
+  var top = r.top - 12 - h >= 8 ? r.top - 12 - h : Math.min(vh - h - 8, r.bottom + 12), left = Math.max(8, Math.min(vw - w - 8, r.left + r.width / 2 - w / 2));
+  d.style.top = Math.max(8, top) + 'px'; d.style.left = left + 'px';
+  return true;
+}
+(function(){
+  var timer = null, sx = 0, sy = 0, shown = false, by = null;
+  function svgAt(t){ var s = t && t.closest && t.closest('.pk .ic svg'); return s || null; }
+  function end(){ clearTimeout(timer); timer = null; if (shown) { ppHide(); shown = false; } by = null; }
+  document.addEventListener('pointerdown', function(e){
+    if (e.pointerType === 'mouse') return;
+    var s = svgAt(e.target); if (!s) return;
+    sx = e.clientX; sy = e.clientY; by = e.pointerId;
+    timer = setTimeout(function(){ timer = null; shown = ppShow(s); }, 350);
+  }, true);
+  document.addEventListener('pointermove', function(e){ if (timer && e.pointerId === by && Math.abs(e.clientX - sx) + Math.abs(e.clientY - sy) > 10) { clearTimeout(timer); timer = null; } }, true);
+  ['pointerup', 'pointercancel'].forEach(function(t){ document.addEventListener(t, function(e){ if (e.pointerId === by || shown) end(); }, true); });
+  document.addEventListener('touchend', function(){ if (shown || timer) end(); }, true);
+  // 出ている間は一覧がスクロールしないように（指を離すまで小窓を出したまま）
+  document.addEventListener('touchmove', function(e){ if (shown) e.preventDefault(); }, { passive: false, capture: true });
+  // 長押しのあとの「クリック」は何もしない
+  document.addEventListener('click', function(e){ if (svgAt(e.target) && e.pointerType !== 'mouse' && document.getElementById('ppop')) { e.stopPropagation(); e.preventDefault(); } }, true);
+  // PC: マウスを乗せている間
+  document.addEventListener('mouseover', function(e){ if (e.sourceCapabilities && e.sourceCapabilities.firesTouchEvents) return; var s = svgAt(e.target); if (s && !shown) { shown = ppShow(s); by = 'mouse'; } }, true);
+  document.addEventListener('mouseout', function(e){ if (by !== 'mouse') return; var s = svgAt(e.target); if (s && !(e.relatedTarget && s.contains(e.relatedTarget))) end(); }, true);
+  window.addEventListener('scroll', function(){ if (by === 'mouse') end(); }, true);
+})();
 </script>
 <script>
 // ホーム画面版: オフラインで起動できるようにする＋セーブを消されにくくする
