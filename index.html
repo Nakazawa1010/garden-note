@@ -13272,6 +13272,35 @@ plantAppraiseD = function(p){
   add.forEach(function(x){ price *= x.x; });
   return { v: Math.round(price / 10) * 10, base: d.base, parts: parts };
 };
+
+// ===== v7.39 スマホで文字が選択されたり、画面が拡大されたりしないように（ご主人 2026-11-26） =====
+// 入力欄（名前・メモ・ラベル）は今までどおり選択・入力できる。
+(function(){
+  var st = document.createElement('style');
+  st.textContent = [
+    'html,body{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent;touch-action:pan-x pan-y}',
+    'input,textarea,select,[contenteditable="true"]{-webkit-user-select:text;user-select:text;-webkit-touch-callout:default}',
+    'img,svg{-webkit-user-drag:none;user-drag:none}',
+    // iPhone は 16px 未満の入力欄に触れると勝手に拡大するので、スマホでは 16px に
+    '@media (max-width:760px){input[type=text],input:not([type]),input[type=search],input[type=number],textarea,select{font-size:16px!important}}'
+  ].join('\n');
+  document.head.appendChild(st);
+  // 拡大の上限を1倍に（iPhone の入力欄フォーカス時の拡大も止まる）
+  var vp = document.querySelector('meta[name=viewport]');
+  if (vp && !/maximum-scale/.test(vp.content)) vp.content = vp.content + ',maximum-scale=1,user-scalable=no';
+  // iPhone の Safari は上の指定だけではピンチ拡大を止めないので、ジェスチャーそのものを止める
+  ['gesturestart', 'gesturechange', 'gestureend'].forEach(function(t){ document.addEventListener(t, function(e){ e.preventDefault(); }, { passive: false }); });
+  document.addEventListener('touchmove', function(e){ if (e.touches && e.touches.length > 1) e.preventDefault(); }, { passive: false });
+  // すばやい2回タップでの拡大を止める（入力欄は除く）
+  var last = 0;
+  document.addEventListener('touchend', function(e){
+    var now = Date.now(), t = e.target;
+    if (now - last < 320 && !(t.closest && t.closest('input,textarea,select'))) { e.preventDefault(); if (t.click && t.closest && t.closest('button,[data-act],a,label')) t.click(); }
+    last = now;
+  }, { passive: false });
+  // 長押しのメニューも止める（入力欄は除く）
+  document.addEventListener('contextmenu', function(e){ var t = e.target; if (!(t.closest && t.closest('input,textarea'))) e.preventDefault(); });
+})();
 </script>
 <script>
 // ホーム画面版: オフラインで起動できるようにする＋セーブを消されにくくする
