@@ -12947,6 +12947,9 @@ document.addEventListener('click', function(e){
   document.head.appendChild(st);
 })();
 try { if (G) { mNavState(); } } catch (e) {}
+// v7.42.1 はじめて開いたときの説明が古い版（ui.js の showIntro、「（試作）へようこそ」）のまま出ていた。
+// 「その他 → 遊び方」「最初から」と同じ新しい説明（pcui.js の showIntro）に差し替える
+try { if (G && G.intro && !$('modal').hidden && /（試作）へようこそ/.test($('mbox').textContent)) showIntro(); } catch (e) {}
 
 // ===== v7.34 (2026-11-25) 交配の選び方（ご主人「母→父→交配→自動でリセット→母…と選べる方がいい」） =====
 // - 交配の画面を開いたときは何も選ばず「① 母」から（前は咲いている株を勝手に母・父に入れていた）
