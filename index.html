@@ -13419,6 +13419,72 @@ function ppDetailInject(id){
 }
 var _showDetailPP = showDetail;
 showDetail = function(id){ var r = _showDetailPP.apply(this, arguments); try { ppDetailInject(id); } catch (e) {} return r; };
+
+// ===== v7.42 タイトル画面（ご主人 2026-11-26 案A: 一枚絵が届くまでのつなぎ） =====
+// 町の一枚絵を背景に、タイトル文字（サナの立ち絵は背景が四角く残るので使わない）・「タップしてはじめる」。画面のどこを押しても始まる（最初のタップでBGMも鳴り始める）。
+// 一枚絵が届いたら TITLE_BG（と必要なら TITLE_BG_TALL）を差し替える。
+var TITLE_BG = null, TITLE_BG_TALL = null;
+(function(){
+  var st = document.createElement('style');
+  st.textContent = [
+    '#title{position:fixed;inset:0;z-index:9500;display:flex;flex-direction:column;align-items:center;justify-content:space-between;overflow:hidden;background:#f5efe1;cursor:pointer;-webkit-user-select:none;user-select:none}',
+    '#title .tbg{position:absolute;inset:-12px;background-size:cover;background-position:center 60%;filter:saturate(.9) brightness(1.04) blur(1.5px)}',
+    '#title .tveil{position:absolute;inset:0;background:linear-gradient(180deg,rgba(255,250,238,.82) 0%,rgba(255,250,238,.25) 38%,rgba(255,250,238,0) 55%,rgba(50,32,10,.62) 100%)}',
+    '#title .tsana{position:absolute;bottom:0;right:6%;height:78%;max-height:720px;filter:drop-shadow(0 6px 18px rgba(0,0,0,.25));pointer-events:none}',
+    '#title .thead{position:relative;margin-top:max(9vh,calc(env(safe-area-inset-top) + 40px));text-align:center}',
+    '#title .tt{font-family:"Yu Mincho","Hiragino Mincho ProN","Noto Serif JP",serif;font-weight:700;font-size:clamp(40px,9vw,84px);letter-spacing:.12em;color:#4a3518;text-shadow:0 2px 0 #fff8e6,0 4px 18px rgba(255,248,230,.9)}',
+    '#title .ten{font-family:Georgia,serif;font-style:italic;letter-spacing:.35em;color:#7a5f33;font-size:clamp(12px,2.2vw,18px);margin-top:2px}',
+    '#title .tfoot{position:relative;margin-bottom:max(8vh,calc(env(safe-area-inset-bottom) + 40px));text-align:center;display:flex;flex-direction:column;align-items:center;gap:10px}',
+    '#title .ttap{font-size:clamp(17px,3.4vw,24px);font-weight:700;color:#fff;letter-spacing:.15em;text-shadow:0 2px 6px rgba(0,0,0,.5);animation:ttap 1.8s ease-in-out infinite}',
+    '@keyframes ttap{0%,100%{opacity:1}50%{opacity:.35}}',
+    '#title .tcont{font-size:13px;color:#fff;text-shadow:0 1px 4px rgba(0,0,0,.6)}',
+    '#title .tnew{font-size:12px;padding:4px 12px;border-radius:999px;border:1px solid rgba(255,255,255,.7);background:rgba(60,40,15,.35);color:#fff;cursor:pointer}',
+    '#title .tver{position:absolute;right:10px;bottom:calc(env(safe-area-inset-bottom) + 6px);font-size:10px;color:rgba(255,255,255,.7)}',
+    '#title .tconf{background:#fffaf0;border:1px solid #d9c59a;border-radius:12px;padding:12px 14px;max-width:300px;color:#4a3a22;font-size:13px;box-shadow:0 6px 22px rgba(0,0,0,.3);cursor:default}',
+    '#title .tconf .tb{display:flex;gap:8px;justify-content:flex-end;margin-top:8px}',
+    '#title.out{opacity:0;transition:opacity .45s}',
+    '@media (max-aspect-ratio:3/4){#title .tsana{right:50%;transform:translateX(50%);height:62%}#title .tbg{background-position:center 70%}}'
+  ].join('\n');
+  document.head.appendChild(st);
+})();
+var GAME_VER = 'v7.42';
+function titleShow(){
+  if (document.getElementById('title')) return;
+  var tall = window.innerHeight > window.innerWidth;
+  var bg = (tall && TITLE_BG_TALL) || TITLE_BG || (typeof SCENEIMG !== 'undefined' && SCENEIMG.town && SCENEIMG.town.src) || (typeof UIIMG !== 'undefined' && UIIMG.BG_midori) || '';
+  var fresh = !G || (G.week === 0 && G.intro);
+  var d = document.createElement('div'); d.id = 'title';
+  d.innerHTML = '<div class="tbg" style="background-image:url(' + bg + ')"></div><div class="tveil"></div>' +
+    '<div class="thead"><div class="tt">ガーデンノート</div><div class="ten">GARDEN NOTE</div></div>' +
+    '<div class="tfoot"><div class="ttap">タップしてはじめる</div>' +
+    (fresh ? '' : '<div class="tcont">つづきから　' + esc(weekLabel(G.week)) + '</div><button class="tnew" data-tact="new">最初から</button>') + '</div>' +
+    '<div class="tver">' + GAME_VER + '</div>';
+  d.addEventListener('click', function(e){
+    var a = e.target.closest && e.target.closest('[data-tact]'); a = a && a.dataset.tact;
+    e.stopPropagation(); e.preventDefault();
+    if (a === 'new') { titleConfirm(d); return; }
+    if (a === 'no') { var c = d.querySelector('.tconf'); if (c) c.remove(); d.querySelector('.tfoot').style.display = ''; return; }
+    if (a === 'yes') { titleNewGame(); titleHide(); return; }
+    if (e.target.closest && e.target.closest('.tconf')) return;
+    titleHide();
+  });
+  document.body.appendChild(d);
+}
+function titleConfirm(d){
+  d.querySelector('.tfoot').style.display = 'none';
+  d.insertAdjacentHTML('beforeend', '<div class="tconf" style="position:relative;margin-bottom:12vh"><b>最初から始めますか？</b><br>今の庭・種・お金・物語の進み具合はすべて消えて、元に戻せません。<div class="tb"><button data-tact="no">やめる</button><button class="pink" data-tact="yes">消して最初から</button></div></div>');
+}
+function titleHide(){ var d = document.getElementById('title'); if (!d) return; d.classList.add('out'); setTimeout(function(){ d.remove(); }, 460); }
+function titleNewGame(){
+  try { closeModal(); } catch (e) {}
+  newGame(1000 + Math.floor(Math.random() * 89000)); unlockStart();
+  if (G.money == null) econInit('normal');
+  UI.mom = UI.dad = null; save(); render();
+  if (G.intro) showIntro();
+  toast('最初から始めました');
+}
+// 起動のときに1回だけ出す
+titleShow();
 </script>
 <script>
 // ホーム画面版: オフラインで起動できるようにする＋セーブを消されにくくする
