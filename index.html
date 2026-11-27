@@ -13450,7 +13450,7 @@ var TITLE_BG = null, TITLE_BG_TALL = null;
   ].join('\n');
   document.head.appendChild(st);
 })();
-var GAME_VER = 'v7.42';
+var GAME_VER = 'v7.43';
 function titleShow(){
   if (document.getElementById('title')) return;
   var tall = window.innerHeight > window.innerWidth;
@@ -13488,6 +13488,633 @@ function titleNewGame(){
 }
 // 起動のときに1回だけ出す
 titleShow();
+
+// ===== v7.43 依頼の作り直し（仕様まとめ https://claude.ai/artifact/Kys9tac9n8mDsFLipa2HaJ 、ご主人 2026-11-27） =====
+// 依頼 = 町の人の日常の小さな用事（メインの物語とは分ける）。押しつけない（申し出）。断っても期限が切れても損はしない。
+// ・短期の依頼: 住民がプレイヤーの花を見て思いつく頼み（咲いた週・品評会の入賞・贈り物がきっかけ）。月2回まで、期限1〜4週
+// ・長期の依頼: 入れ替え式のひな形「条件つきの花を咲かせて」1パターン。作った直後・手が空いたとき・まだ植えていない植物・品評会のあと/季節の変わり目に出す
+// ・株を貸す: 1〜2週「貸出中」。世話・交配・採種・出品はできない。成長は進み、弱らず、天気の被害も受けない
+// ・お返し: 難度（軽・中・重）で濃さが変わる。その人に頼まないと手に入らないもの＋お金は添える程度（平均的な株の売値より安く）
+// ・今までの依頼（カエラ「見せて」・ミドラ「種をゆずって」・マシマ「予想を当てて」）はなくし、受けていた分も引き継がない
+// 保存: G.q2 = { list:[依頼], tix:[お返しの券], mon:{月:短期の数}, lastLong:週, idle:週数, nid, hist:[終わった依頼] }
+var Q2_P = {
+  okami: { n: 'ミドラ', ic: '🧑‍🌾', spk: 'okami', fav: 'あら、大好きな{sp}！ ', why: '店先に並べたいの' },
+  yoshida: { n: 'ヨシュタ', ic: '👴', spk: 'yoshida', fav: 'おお、わしの好きな{sp}じゃ。', why: '月の集まりで皆に見せたいんじゃ' },
+  kaede: { n: 'カエラ', ic: '👒', spk: 'kaede', fav: 'まあ、大好きな{sp}。', why: '温室のコレクションに迎えたいの' },
+  seriza: { n: 'セリザ博士', ic: '🔬', spk: 'seriza', fav: 'ほう、好きな{sp}だ。', why: '研究の標本にしたいんだ' },
+  luka: { n: 'ルカ', ic: '🧒', spk: 'luka', fav: 'わあ、ぼくの好きな{sp}だ！ ', why: '旅先の子へのおみやげにしたいんだ' },
+  mashima: { n: 'マシマ', ic: '🎩', spk: 'mashima', fav: 'おお、好みの{sp}ですな。', why: '品評会の展示の目玉にしたいのです' },
+  claude: { n: 'クローデ先生', ic: '🎨', light: true },
+  milka: { n: 'ミルカ', ic: '📰', light: true },
+  amari: { n: 'アマリ', ic: '🍇', light: true },
+  yuina: { n: 'ユイナ', ic: '🖌️', light: true },
+  bald: { n: 'バルド', ic: '🧔', light: true },
+  town: { n: '町の人', ic: '🏘️', light: true }
+};
+var Q2_KIND = {
+  show: { n: '見せる', lv: 1 }, cut: { n: '一輪', lv: 1 }, seed: { n: '種を少し', lv: 2 }, lend: { n: '株を貸す', lv: 2 },
+  more: { n: 'もう一株', lv: 2 }, give: { n: '株ごと譲る', lv: 3 }, grow: { n: '条件つきの花', lv: 3 }
+};
+var Q2_LV = ['', '軽', '中', '重'];
+// 一から育てる長期の依頼の期限（種まきから咲くまで＋余裕。週）
+var Q2_LONG_WK = { asa: 14, hm: 14, pz: 20, kk: 26, tl: 32, rs: 36, aj: 56, bb: 100, hel: 100, cm: 100 };
+var Q2_SHORT_MAX = 2;   // 1か月（4週）に出る短期の依頼の数
+var Q2_LOAN_SP = ['asa', 'pz', 'tl', 'aj']; // カエラが咲いた株を貸してくれる植物（今は咲いた株を用意できるものだけ）
+
+function q2(){
+  if (!G.q2) { G.q2 = { list: [], tix: [], mon: {}, lastLong: -99, idle: 0, nid: 1, hist: [] }; G.quests = []; }
+  return G.q2;
+}
+function q2Rng(salt){ var r = mb((G.seed * 7919 + G.week * 131 + (salt || 0) * 104729 + 77) | 0); r(); r(); return r; }
+function q2Pick(a, r){ return a[Math.floor(r() * a.length)]; }
+function q2SpN(sp){ try { return spName(sp || 'asa') || (dexDef()[sp] || {}).n || ''; } catch (e) { return ''; } }
+function q2Name(k){ return (Q2_P[k] || {}).n || ''; }
+function q2Met(k){
+  if (FRIENDS[k]) return frMet(k);
+  if (k === 'claude' || k === 'milka' || k === 'amari' || k === 'yuina') return (G.contests || []).length > 0;
+  if (k === 'bald') return (G.exped || []).some(function(e){ return e.adv === 'baldo'; });
+  return true;
+}
+function q2Fav(k, sp){ return !!(FRIENDS[k] && FRIENDS[k].like.indexOf(sp) >= 0); }
+function q2Open(){ return q2().list.filter(function(q){ return !q.done; }); }
+function q2Busy(k){ return q2Open().some(function(q){ return q.who === k; }); }
+// 平均的な株の売値より安い「添えるお金」
+function q2Money(sp, lv){ var b = (typeof POT_BASE !== 'undefined' && POT_BASE[sp || 'asa']) || 500; return Math.max(50, Math.round(b * [0, 0.2, 0.4, 0.7][lv] / 10) * 10); }
+
+// ---- 株の見方 ----
+// 依頼に使える咲いた株（貸出中はだめ。カエラから借りた株は「見せる」「一輪」だけ）
+function q2Bloom(p){ return !!p && p.stage < 7 && !p.lent && (p.sp === 'bb' ? !!(p.stage === 6 && p.berry && p.berry.ripe) : p.stage === 5); }
+function q2Tags(p){ try { return plantTags(p); } catch (e) { return {}; } }
+function q2Has(p, conds){ var t = q2Tags(p); return (conds || []).every(function(c){ return t[c.cat + ':' + c.name]; }); }
+function q2CondText(conds){ return (conds || []).map(function(c){ return '「' + c.name + '」'; }).join('で'); }
+function q2Sc(p){ try { return scorePlant(p); } catch (e) { return { d: 0, col: 0, pat: 0, mut: 0, har: 0 }; } }
+function q2RareMut(p){ return (p.seen || []).some(function(k){ return MUTS[k] && MUTS[k].t !== '不利' && (typeof MUT_RARITY === 'undefined' || (MUT_RARITY[k] || 2) >= 2); }); }
+
+// ---- 短期の依頼の候補（住民ごとの好み。大まかに見る） ----
+function q2ShortCands(p, why){
+  var sp = spOf(p), sc = q2Sc(p), out = [], nm = p.name, spn = q2SpN(sp);
+  var add = function(who, kind, t, ex){ out.push(Object.assign({ who: who, kind: kind, sp: sp, pid: p.id, pname: nm, t: t.replace(/\{name\}/g, nm).replace(/\{sp\}/g, spn) }, ex || {})); };
+  if (why === 'prize') { add('mashima', 'lend', '入賞おめでとうございます。会場の飾りに「{name}」を1週間お借りできませんかな。', { wk: 1 }); add('claude', 'show', '入賞した「{name}」、もう一度近くで見せていただけますか。'); return out; }
+  if (why === 'gift') { add('town', 'show', '贈った株の話を聞いた宿の客が「ほかの花も見てみたい」と言っている。', { tn: '宿の客' }); add('bald', 'cut', 'わしにも一輪もらえんか。旅の荷に挿していきたい。'); return out; }
+  var newMut = (p.seen || []).some(function(k){ var e = MUTS[k] && ((G.dex[sp] || {}).mut || {})[MUTS[k].n]; return e && e.w === G.week && e.by === p.name; });
+  if (p.health >= 85 && sp !== 'bb') { add('okami', 'give', '「{name}」、元気がいいわね。店先に置きたいから、1株ゆずってもらえない？'); add('okami', 'seed', '{sp}の種、少しお店で扱わせてもらえないかしら。'); }
+  if (sc.d >= 65 && sp !== 'bb') {
+    if (sp === 'asa' || sp === 'hm') add('yoshida', 'give', 'つるがよう伸びとる。縁側の日よけに、こういう株を1株ゆずってくれんか。');
+    add('yoshida', 'lend', '孫が夏休みに遊びに来るんじゃ。観察用に「{name}」を2週間ほど貸してくれんかの。', { wk: 2 });
+  }
+  if (q2RareMut(p) && sp !== 'bb') add('kaede', 'give', '「{name}」……私の温室に迎えたいわ。株ごと譲ってくれない？');
+  if (newMut) {
+    add('seriza', 'seed', '「{name}」の血をひく種を、標本に1袋もらえないかな。');
+    if (q2Sibs(p).length) add('seriza', 'more', '同じ親から、同じ色の株をもう1株咲かせてくれないか。性質が受け継がれるか見たいんだ。', { col: q2Col(p) });
+  }
+  if (sp === 'bb' || (sp === 'hm' && sc.d >= 55)) add('luka', 'seed', sp === 'bb' ? '次の旅に、実を少し持っていきたいんだ。ブルーベリーの種を1袋もらえる？' : '行った先の子に、ヒマワリの種をあげたいんだ。1袋もらえる？');
+  if (sc.d >= 80 && sp !== 'bb') add('mashima', 'lend', 'これは見事。会場の飾りに「{name}」を1週間お借りできませんかな。', { wk: 1 });
+  if (sc.col >= 80) add('claude', 'show', '「{name}」の色、近くで見せていただけますか。');
+  try { if (plantColName(p) && plantColName(p) === trendCol(sp, seasonYear(G.week))) add('milka', 'show', 'その花、今年の流行色ですよね！ 写真を撮らせてください！'); } catch (e) {}
+  if (sp === 'bb' && sc.pat >= 60) add('amari', 'cut', 'その実、ひと粒味見させてもらえないかい。');
+  if (sc.pat >= 75) add('yuina', 'show', '「{name}」を絵に描かせてもらえませんか。');
+  add('bald', 'cut', '旅に出る前に、その花を一輪もらえんか。');
+  var tn = q2Pick(['近所の子', '郵便屋さん', '宿の客'], q2Rng(strHash(p.id)));
+  add('town', tn === '近所の子' ? 'cut' : tn === '郵便屋さん' ? 'seed' : 'show', tn === '近所の子' ? 'お母さんに一輪あげたいの。もらってもいい？' : tn === '郵便屋さん' ? 'うちの庭にもまきたいんです。種を少し分けてもらえませんか。' : '宿の窓から見えたあの花、近くで見せてもらえますか。', { tn: tn });
+  return out;
+}
+function q2Col(p){ try { return plantColName(p); } catch (e) { return ''; } }
+// 同じ親の兄弟（同じ種袋）でまだ生きている株
+function q2Sibs(p){ return livingPlants().filter(function(x){ return x.id !== p.id && x.pk && x.pk === p.pk && !x.lent && !x.borrowed; }); }
+
+// ---- 長期の依頼（ひな形「条件つきの花を咲かせて」） ----
+var Q2_LCATS = ['col', 'pat', 'shape', 'form'];
+function q2LongWho(sp, r){
+  var ks = Object.keys(FRIENDS).filter(function(k){ return q2Met(k) && !q2Busy(k); });
+  var fav = ks.filter(function(k){ return FRIENDS[k].like.indexOf(sp) >= 0; });
+  return (fav.length ? q2Pick(fav, r) : ks.length ? q2Pick(ks, r) : null);
+}
+function q2DexItems(sp, known){
+  var d = (G.dex || {})[sp] || {}, out = [], def = (dexDef() || {})[sp];
+  if (!def) return out;
+  def.cats.forEach(function(c){ if (Q2_LCATS.indexOf(c.id) < 0) return; c.list.forEach(function(n){ if (n === '無地' || n === '単色') return; if (!!(d[c.id] && d[c.id][n]) === known) out.push({ cat: c.id, name: n }); }); });
+  return out;
+}
+function q2LongMake(trig, r){
+  var sp, conds = [], live = livingPlants(), made = G.q2._made;
+  if (trig === 'made' && made) {
+    sp = made.sp; var cand = q2DexItems(sp, false); if (!cand.length) return null;
+    conds = [q2Pick(cand, r)];
+    var p = G.plants[made.pid];
+    if (p && r() < 0.5) { var t = q2Tags(p), col = Object.keys(t).filter(function(x){ return x.indexOf('col:') === 0; })[0]; if (col && conds[0].cat !== 'col') conds.unshift({ cat: 'col', name: col.slice(4) }); }
+  } else if (trig === 'unplanted') {
+    var sps = Object.keys(G.unlock || { asa: 1 }).filter(function(s){ return isUn(s) && !live.some(function(p){ return spOf(p) === s; }) && !(((G.rec || {})[s] || {}).blooms > 0) && dexDef()[s]; });
+    if (!sps.length) return null; sp = q2Pick(sps, r); conds = [];
+  } else {
+    // 手が空いたとき・品評会のあと・季節の変わり目: 手持ちの植物で、図鑑で知っているのに今の庭にない特徴（手持ちから1〜2世代で届く目標）
+    var mine = {}; live.forEach(function(p){ mine[spOf(p)] = 1; }); (G.packets || []).forEach(function(k){ if (k.seeds && k.seeds.length) mine[k.sp || 'asa'] = 1; });
+    var sps2 = Object.keys(mine).filter(function(s){ return s !== 'bb' && isUn(s) && dexDef()[s]; }); if (!sps2.length) return null;
+    sp = q2Pick(sps2, r);
+    var have = {}; live.forEach(function(p){ if (spOf(p) === sp && (p.stage >= 5 || p.bloomedAt != null)) Object.assign(have, q2Tags(p)); });
+    var c2 = q2DexItems(sp, true).filter(function(c){ return !have[c.cat + ':' + c.name]; }); if (!c2.length) return null;
+    conds = [q2Pick(c2, r)];
+  }
+  var who = trig === 'season' && q2Met('okami') && !q2Busy('okami') ? 'okami' : q2LongWho(sp, r); if (!who) return null;
+  var spn = q2SpN(sp), P = Q2_P[who];
+  var t = (conds.length ? q2CondText(conds) + 'の' + spn : spn + 'の花') + 'を咲かせてくれないか。' + P.why + '。';
+  if (who === 'okami') t = (conds.length ? q2CondText(conds) + 'の' + spn : spn) + 'を咲かせてもらえないかしら。' + (trig === 'season' ? '次の季節の売り物にしたいの。' : P.why + '。');
+  if (who === 'kaede') t = (conds.length ? q2CondText(conds) + 'の' + spn : spn + 'の花') + 'を咲かせて見せてくれない？ ' + P.why + '。';
+  return { who: who, kind: 'grow', sp: sp, conds: conds, t: t, trig: trig, due: G.week + (Q2_LONG_WK[sp] || 30) + (trig === 'unplanted' ? 8 : 0) };
+}
+
+// ---- 毎週 ----
+// 咲いた株を覚えておく（短期の依頼のきっかけ）。作った直後（その株で図鑑に新しく載った）も覚える
+var _questOnBloomQ2 = questOnBloom;
+questOnBloom = function(p, memoRes){
+  var out = _questOnBloomQ2(p, memoRes);
+  if (G._sim) return out;
+  try {
+    var Q = q2(); Q._bl = Q._bl || []; Q._bl.push(p.id);
+    var sp = spOf(p), d = (G.dex || {})[sp] || {}, news = false;
+    Object.keys(d).forEach(function(c){ Object.keys(d[c]).forEach(function(n){ var e = d[c][n]; if (e && e.w === G.week && e.by === p.name) news = true; }); });
+    if (news) Q._made = { sp: sp, pid: p.id };
+  } catch (e) {}
+  return out;
+};
+function q2Push(o, notes, r){
+  var Q = q2(); o.id = 'r' + (Q.nid++); o.from = G.week; o.done = null;
+  o.lv = Q2_KIND[o.kind].lv;
+  if (o.kind !== 'grow') o.due = G.week + (o.kind === 'show' || o.kind === 'cut' ? 2 : o.kind === 'more' ? 4 : 3);
+  if (q2Fav(o.who, o.sp) && Q2_P[o.who].fav) { o.t = Q2_P[o.who].fav.replace('{sp}', q2SpN(o.sp)) + o.t; o.fav = true; }
+  Q.list.push(o);
+  var P = Q2_P[o.who], nm = o.tn || P.n;
+  notes.push(P.ic + ' ' + (o.kind === 'grow' ? nm + 'から頼みごとの相談が届いた（依頼の掲示板）' : '垣根ごしに通りがかった' + nm + 'が、' + (o.pname ? '「' + o.pname + '」' : 'その花') + 'に目をとめた（依頼の掲示板）'));
+}
+function q2Tick(notes){
+  var Q = q2(), r = q2Rng(1), mon = Math.floor(G.week / 4);
+  // 期限切れ（損はしない）
+  Q.list.forEach(function(q){
+    if (q.done) return;
+    if (q.lentPid) return;
+    if (q.kind === 'grow' && !q.acc && G.week - q.from > 4) { q.done = 'expired'; q.at = G.week; return; }
+    if (G.week > q.due) { q.done = 'expired'; q.at = G.week; notes.push((Q2_P[q.who] || {}).ic + ' ' + (q.tn || q2Name(q.who)) + 'の頼みの期限が過ぎた（気にしなくて大丈夫）'); }
+  });
+  // 貸した株が戻る・借りた株を返す
+  livingPlants().forEach(function(p){
+    if (p.lent && G.week >= p.lent.back) {
+      var q = Q.list.find(function(x){ return x.id === p.lent.q; }), who = p.lent.to; delete p.lent;
+      var rw = '';
+      if (q) { q2Done(q, '「' + p.name + '」を貸した'); rw = q2Reward(q); }
+      notes.push('📦 「' + p.name + '」が' + (Q2_P[who] ? q2Name(who) : '') + 'のところから戻ってきた。' + (r() < 0.4 ? '「会場で見た人が褒めていたよ」とのこと。' : '') + (rw ? 'お返し: ' + rw : ''));
+      p.hist.push({ w: G.week, t: q2Name(who) + 'に貸していた株が戻ってきた' });
+    }
+    if (p.borrowed && G.week >= p.borrowed.back) {
+      var pot = G.pots.indexOf(p.id); if (pot >= 0) G.pots[pot] = null; p.stage = 7; p.gone = 'kaede';
+      notes.push('👒 借りていた「' + p.name + '」をカエラに返した');
+    }
+  });
+  // 手が空いた週を数える（咲いている株も、熟していない実もない）
+  var live = livingPlants(), quiet = !live.some(function(p){ return p.stage === 5 || (p.fruits || []).some(function(f){ return !f.ripe; }); });
+  Q.idle = quiet ? (Q.idle || 0) + 1 : 0;
+  var open = q2Open(), act = open.length;
+  // 短期の依頼（花を見た住民の思いつき）
+  var bl = (Q._bl || []).map(function(id){ return G.plants[id]; }).filter(function(p){ return p && p.stage < 7; }), trig = [];
+  bl.forEach(function(p){ trig = trig.concat(q2ShortCands(p, 'bloom')); });
+  var lastC = (G.contests || [])[0];
+  if (lastC && lastC.w === G.week && lastC.rank && lastC.rank <= 3 && lastC.entry && G.plants[lastC.entry.id]) trig = trig.concat(q2ShortCands(G.plants[lastC.entry.id], 'prize'));
+  if (Q._gift === G.week - 1 || Q._gift === G.week) { var any = live.filter(q2Bloom)[0]; if (any) trig = trig.concat(q2ShortCands(any, 'gift')); }
+  trig = trig.filter(function(c){ return q2Met(c.who) && !q2Busy(c.who); });
+  if (trig.length && (Q.mon[mon] || 0) < Q2_SHORT_MAX && act < 4 && r() < 0.65) {
+    // 人を先に選ぶ（候補の多い人ばかりにならないように）。名前のある住民を少し優先
+    var whos = trig.map(function(c){ return c.who; }).filter(function(w, i, a){ return a.indexOf(w) === i; });
+    var named = whos.filter(function(w){ return !Q2_P[w].light; });
+    var w = named.length && r() < 0.7 ? q2Pick(named, r) : q2Pick(whos, r);
+    var c = q2Pick(trig.filter(function(x){ return x.who === w; }), r);
+    q2Push(c, notes, r); Q.mon[mon] = (Q.mon[mon] || 0) + 1; act++;
+  }
+  // 長期の依頼（タイミングを見て。押しつけない）
+  var longs = open.filter(function(q){ return q.kind === 'grow'; }).length;
+  if (longs < 2 && act < 4 && G.week - Q.lastLong >= 6) {
+    var why = Q._made && r() < 0.6 ? 'made' : Q.idle >= 3 ? 'idle' : (lastC && lastC.w === G.week) ? 'contest' : G.week % 12 === 0 ? 'season' : null;
+    if (!why && G.week > 8 && r() < 0.15) why = 'unplanted';
+    if (why) { var L = q2LongMake(why, r); if (L) { q2Push(L, notes, r); Q.lastLong = G.week; if (why === 'idle') Q.idle = 0; } }
+  }
+  Q._bl = []; Q._made = null;
+  Q.list = Q.list.filter(function(q){ return !q.done || G.week - q.at < 4; });
+}
+var _questTickQ2 = questTick;
+questTick = function(notes){
+  // 前の依頼のしくみ（4週ごとに3種類の依頼）は止める: 前の処理には「依頼が3件ある」ように見せる
+  var keep = G.quests, fake = [0, 1, 2].map(function(){ return { done: false, due: 1e9, t: '' }; });
+  G.quests = fake;
+  try { _questTickQ2(notes); } finally { G.quests = []; }
+  if (!G._sim) { try { q2Tick(notes); } catch (e) { console.error(e); } }
+};
+
+// ---- 応える ----
+function q2Find(id){ return q2().list.find(function(q){ return q.id === id; }); }
+// その依頼に使える株・種袋
+function q2Plants(q){
+  var L = livingPlants().filter(function(p){ return spOf(p) === q.sp && q2Bloom(p); });
+  // 「その花」への頼み: 目をとめた株が使えるうちはその株だけ
+  if (q.pid && q.kind !== 'more' && q.kind !== 'grow' && q.kind !== 'seed') { var me = L.filter(function(p){ return p.id === q.pid && (q.kind === 'show' || q.kind === 'cut' || !p.borrowed); }); if (me.length) return me; }
+  if (q.kind === 'show' || q.kind === 'cut') return L;
+  L = L.filter(function(p){ return !p.borrowed; });
+  if (q.kind === 'give') return L.filter(function(p){ return q.who !== 'kaede' || p.id === q.pid; });
+  if (q.kind === 'lend') return L;
+  if (q.kind === 'more') return L.filter(function(p){ return p.id !== q.pid && (!q.col || q2Col(p) === q.col); });
+  if (q.kind === 'grow') return L.filter(function(p){ return q2Has(p, q.conds); });
+  return [];
+}
+function q2Packets(q){ return q.kind === 'seed' ? G.packets.filter(function(k){ return (k.sp || 'asa') === q.sp && k.seeds && k.seeds.length; }) : []; }
+function q2Done(q, how){
+  q.done = 'ok'; q.at = G.week; q.how = how; G.qDone = (G.qDone || 0) + 1;
+  if (FRIENDS[q.who]) frAdd(q.who, 1, '依頼');
+}
+// pid / pkid で応える。mode: grow のとき 'give'（渡す・重）か 'show'（見せる・中）
+function q2Fulfill(id, pid, pkid, mode){
+  var q = q2Find(id); if (!q || q.done) return { ok: false, reason: 'この依頼はもう終わっています。' };
+  var P = Q2_P[q.who], nm = q.tn || P.n;
+  if (q.kind === 'seed') {
+    var k = q2Packets(q).find(function(x){ return x.id === pkid; }); if (!k) return { ok: false, reason: 'その種袋は渡せません。' };
+    G.packets = G.packets.filter(function(x){ return x !== k; });
+    q2Done(q, '種袋「' + k.label + '」'); return { ok: true, q: q, rw: q2Reward(q), what: '種袋「' + k.label + '」を渡した' };
+  }
+  var p = q2Plants(q).find(function(x){ return x.id === pid; }); if (!p) return { ok: false, reason: 'その株は使えません。' };
+  if (q.kind === 'show') { q2Done(q, '「' + p.name + '」を見せた'); p.hist.push({ w: G.week, t: nm + 'に見せた' }); return { ok: true, q: q, rw: q2Reward(q), what: '「' + p.name + '」を見せた' }; }
+  if (q.kind === 'cut') { if ((p.flowers || 0) > 1) p.flowers--; q2Done(q, '「' + p.name + '」の一輪'); p.hist.push({ w: G.week, t: nm + 'に一輪あげた' }); return { ok: true, q: q, rw: q2Reward(q), what: '「' + p.name + '」を一輪あげた' }; }
+  if (q.kind === 'lend') {
+    var wk = q.wk || 2; p.lent = { to: q.who, back: G.week + wk, q: q.id }; q.lentPid = p.id; q.lentBack = p.lent.back;
+    p.hist.push({ w: G.week, t: nm + 'に' + wk + '週間貸した' });
+    return { ok: true, q: q, lent: true, what: '「' + p.name + '」を' + weekLabel(p.lent.back) + 'まで貸した（戻ってきたらお返し）' };
+  }
+  if (q.kind === 'grow' && mode === 'show') { q.lv = 2; q2Done(q, '「' + p.name + '」を見せた'); p.hist.push({ w: G.week, t: nm + 'に見せた' }); return { ok: true, q: q, rw: q2Reward(q), what: '「' + p.name + '」を見せた' }; }
+  // 渡す（株ごと・もう一株・条件つきの花を渡す）
+  var pot = G.pots.indexOf(p.id); if (pot >= 0) G.pots[pot] = null;
+  p.stage = 7; p.gift = G.week; p.giftTo = q.who;
+  if (q.kind === 'grow') q.lv = 3;
+  q2Done(q, '「' + p.name + '」を渡した');
+  return { ok: true, q: q, rw: q2Reward(q), what: '「' + p.name + '」を渡した' };
+}
+function q2Accept(id){ var q = q2Find(id); if (q && !q.done) { q.acc = G.week; return true; } return false; }
+function q2Decline(id){ var q = q2Find(id); if (!q || q.done) return; q.done = 'no'; q.at = G.week; }
+
+// ---- お返し ----
+// 返り値: 受け取ったものの説明
+function q2Reward(q){
+  var lv = q.lv || Q2_KIND[q.kind].lv, m = q2Money(q.sp, lv), out = [], Q = q2(), k = q.who;
+  var tix = function(o){ o.id = 't' + (Q.nid++); o.from = k; o.w = G.week; Q.tix.push(o); };
+  if (k === 'okami' && lv >= 2) { var pks = q2HoldSeeds(q.sp, lv >= 3 ? 2 : 1); if (pks.length) out.push('取り置きの種 ' + pks.map(function(x){ return '「' + x.label + '」'; }).join('・')); }
+  if (k === 'yoshida' && lv >= 2) { var offers = q2SwapOffers(lv >= 3 ? 5 : 3); if (offers.length) { tix({ k: 'swap', offers: offers }); out.push('朝露の輪の「種の交換会」への招待（' + offers.length + '袋から選べる）'); } }
+  if (k === 'kaede' && lv >= 2) { tix({ k: 'kloan', wk: lv >= 3 ? 3 : 2 }); out.push('カエラの秘蔵の株を' + (lv >= 3 ? 3 : 2) + '週間借りられる約束'); }
+  if (k === 'seriza') { tix({ k: 'appr', n: lv }); out.push('博士の鑑定（種袋1つの隠れた性質を' + lv + 'つ）'); }
+  if (k === 'luka' && lv >= 2) { tix({ k: 'luka', rare: lv >= 3 }); out.push('ルカの「必ず持ち帰る」採取 1回' + (lv >= 3 ? '（野生だけの珍しい株も）' : '')); }
+  if (k === 'mashima' && lv >= 2) { tix({ k: 'judge', big: lv >= 3 }); out.push('マシマの特別審査 1回'); }
+  if (k === 'claude' || k === 'milka' || k === 'amari' || k === 'yuina') { var h = q2JudgeHint(k, q.sp); if (h) { out.push(h); Q.hints = Q.hints || []; Q.hints.unshift({ w: G.week, who: k, t: h }); Q.hints.length = Math.min(Q.hints.length, 8); } }
+  if (k === 'bald') { var bp = q2BaldSeeds(); if (bp) out.push('遠い土地の種「' + bp.label + '」'); }
+  if (k === 'town') { var sk = q2Skin(); if (sk) out.push('鉢のデザイン「' + sk + '」'); }
+  earn(m, '依頼のお礼（' + (q.tn || q2Name(k)) + '）'); out.push(yen(m));
+  q.rw = out.join('・');
+  G.log.unshift({ w: G.week, t: (Q2_P[k] || {}).ic + ' ' + (q.tn || q2Name(k)) + 'の頼みに応えた。お返し: ' + q.rw });
+  return q.rw;
+}
+// ミドラ: 店にまだ並んでいない種を取り置き（解放済みの植物から）
+function q2HoldSeeds(sp, n){
+  var inShop = {}; try { shopRefresh().items.forEach(function(it){ inShop[it.id] = 1; }); } catch (e) {}
+  var cs = CATALOG.filter(function(c){ return c.make && c.sp && c.cat === '種・苗' && isUn(c.sp) && !inShop[c.id]; });
+  var pref = cs.filter(function(c){ return c.sp === sp; });
+  cs = pref.length >= n ? pref : pref.concat(cs.filter(function(c){ return c.sp !== sp; }));
+  cs.sort(function(a, b){ return b.p - a.p; });
+  var out = [];
+  cs.slice(0, n).forEach(function(c, i){ var pk = withSeedAll((G.seed * 31 + G.week * 17 + i) | 0, function(){ return c.make(); }); if (pk && pk.label) { pk.desc = (pk.desc || '') + '（ミドラが取り置いてくれた種）'; out.push(pk); } });
+  return out;
+}
+// 植物ごとの変異（隠れた性質）
+function q2MutKeys(sp){
+  var ks = sp === 'tl' ? TMUT_KEYS : sp === 'pz' ? PMUT_KEYS : sp === 'aj' ? AJMUT_KEYS : sp === 'hm' ? HMMUT_KEYS : sp === 'rs' ? RSMUT_KEYS : sp === 'kk' ? KKMUT_KEYS : sp === 'cm' ? CMMUT_KEYS : sp === 'bb' ? [] : FLOWER_MUTS;
+  return (ks || []).filter(function(k){ return MUTS[k] && MUTS[k].t !== '不利' && (typeof MUT_RARITY === 'undefined' || (MUT_RARITY[k] || 2) <= 3); });
+}
+// ヨシュタ: 朝露の輪の種の交換会。仲間が長年つないできた古い系統（隠れた性質つき）。解放済みの植物から
+function q2SwapOffers(n){
+  var sps = Object.keys(dexDef()).filter(function(s){ return isUn(s) && s !== 'bb' && q2MutKeys(s).length; });
+  if (!sps.length) return [];
+  var r = q2Rng(5), out = [];
+  for (var i = 0; i < n * 3 && out.length < n; i++) {
+    var sp = sps[(i + Math.floor(r() * sps.length)) % sps.length];
+    var cs = CATALOG.filter(function(c){ return c.make && c.sp === sp && c.cat === '種・苗'; }); if (!cs.length) continue;
+    var c = q2Pick(cs, r), keep = G.packets.slice(), pno = G.pno;
+    var pk = withSeedAll((G.seed * 53 + G.week * 29 + i * 7) | 0, function(){ return c.make(); });
+    G.packets = keep; if (!pk || !pk.seeds) continue;
+    var ks = q2MutKeys(sp), mk = q2Pick(ks, r), nS = Math.max(1, Math.ceil(pk.seeds.length / 2));
+    pk.seeds.forEach(function(g, j){ if (j < nS && g.m && g.m.indexOf(mk) < 0) g.m.push(mk); });
+    pk.label = '輪の古い系統「' + pk.label + '」'; pk.desc = '朝露の輪の仲間が長年つないできた古い' + q2SpN(sp) + 'の系統。何か隠れた性質があるらしい。'; pk.wa = mk;
+    if (out.some(function(x){ return x.sp === pk.sp && (x.wa === mk || (x.label === pk.label && i < n * 2)); })) continue;
+    out.push(pk);
+  }
+  return out;
+}
+// 審査員: 審査の好みのひとこと（次にその人が審査する品評会つき）
+function q2JudgeHint(k, sp){
+  var jid = { claude: 'j3', milka: 'j6', amari: 'j5' }[k], nx = '';
+  try { if (jid) { var c = nextContests(6).find(function(x){ return contestJudges(x.c, x.w).indexOf(jid) >= 0; }); if (c) nx = '次は' + weekLabel(c.w) + 'の「' + c.c.n + '」で審査します。'; } } catch (e) {}
+  if (k === 'claude') return 'クローデ先生のひとこと「色の深みを見ます。濃く澄んだ色ほど点をつけます。」' + nx;
+  if (k === 'milka') { var tr = ''; try { tr = trendCol(sp, seasonYear(G.week)); } catch (e) {} return 'ミルカのひとこと「今年の' + q2SpN(sp) + 'の流行色は' + (tr || '…ひみつ') + '！ 流行色だと私の点が上がります」' + nx; }
+  if (k === 'amari') return 'アマリのひとこと「実は粒より甘さだね。模様・咲き方の点で見るよ」' + nx;
+  return 'ユイナのひとこと「品評会では、ほかの出品と違う色だと少し点が足されるんですよ」';
+}
+// バルド: 遠い土地の珍しい種（採取の行き先の植物から、珍しい株の種）
+function q2BaldSeeds(){
+  var rs = EX_REGIONS.filter(function(x){ return isUn(x.sp); }); if (!rs.length) return null;
+  var R = q2Pick(rs, q2Rng(9)), seeds = [];
+  for (var i = 0; i < 2; i++) seeds.push(R.sp === 'hel' ? wildHel('', true) : R.sp === 'pz' ? wildPz('', true) : R.sp === 'aj' ? wildAj('', true) : R.sp === 'tl' ? wildTl('', true) : wildAsa('', true, R.id));
+  var ex = { wild: R.id }; if (R.sp === 'tl') { ex.bulb = true; ex.tk = 'fos'; }
+  return newPacketFrom('バルドの土産', R.sp, seeds, 'バルドが「' + R.n + '」よりもっと遠い土地で見つけた、珍しい株の' + (R.sp === 'tl' ? '球根' : '種') + '。', ex);
+}
+// 町の人: 鉢のデザイン（まだ持っていないもの）
+function q2Skin(){
+  if (typeof GSKIN === 'undefined') return '';
+  G.skins = G.skins || [];
+  var s = GSKIN.filter(function(x){ return x.k && G.skins.indexOf(x.k) < 0; }).sort(function(a, b){ return a.p - b.p; })[0];
+  if (!s) return ''; G.skins.push(s.k); return s.n;
+}
+
+// ---- お返しの券を使う ----
+function q2Tix(id){ return q2().tix.find(function(t){ return t.id === id; }); }
+function q2TixUse(t){ var Q = q2(); Q.tix = Q.tix.filter(function(x){ return x !== t; }); }
+// ヨシュタの交換会: 自分の種袋1つと、輪の古い系統の袋1つを交換
+function q2Swap(tid, idx, pkid){
+  var t = q2Tix(tid); if (!t || t.k !== 'swap') return { ok: false };
+  var o = t.offers[idx], mine = G.packets.find(function(k){ return k.id === pkid && k.seeds && k.seeds.length; });
+  if (!o) return { ok: false, reason: '選んだ袋がありません。' };
+  if (!mine) return { ok: false, reason: '交換に出す種袋を選んでください。' };
+  G.packets = G.packets.filter(function(k){ return k !== mine; });
+  o.made = G.week; G.packets.unshift(o); q2TixUse(t);
+  G.log.unshift({ w: G.week, t: '👴 朝露の輪の交換会で「' + mine.label + '」と「' + o.label + '」を交換した' });
+  return { ok: true, got: o, gave: mine };
+}
+// 博士の鑑定: 種袋の中の隠れた性質（変異）を n 個まで教えてもらう。図鑑にない変異を先に
+function q2Appraise(tid, pkid){
+  var t = q2Tix(tid), k = G.packets.find(function(x){ return x.id === pkid; }); if (!t || t.k !== 'appr' || !k || !k.seeds || !k.seeds.length) return { ok: false, reason: '種袋を選んでください。' };
+  var sp = k.sp || 'asa', dm = ((G.dex || {})[sp] || {}).mut || {}, found = [];
+  k.seeds.forEach(function(g, i){ (g.m || []).forEach(function(m){ if (MUTS[m]) found.push({ i: i, m: m, nd: !dm[MUTS[m].n], r: (typeof MUT_RARITY !== 'undefined' && MUT_RARITY[m]) || 2 }); }); });
+  found.sort(function(a, b){ return (b.nd - a.nd) || (b.r - a.r) || (a.i - b.i); });
+  var got = found.slice(0, t.n);
+  k.appr = (k.appr || []).concat(got.map(function(x){ return { i: x.i, m: x.m }; }));
+  var txt = got.length ? got.map(function(x){ return (x.i + 1) + '粒目に「' + MUTS[x.m].n + '」'; }).join('、') : '目立った隠れた性質はない';
+  k.desc = (k.desc || '') + '【博士の鑑定 ' + weekLabel(G.week) + '】' + txt + '。';
+  q2TixUse(t);
+  G.log.unshift({ w: G.week, t: '🔬 博士に「' + k.label + '」を鑑定してもらった: ' + txt });
+  return { ok: true, txt: txt, n: got.length, more: found.length > got.length };
+}
+// カエラの秘蔵株: 解放済みの植物の、咲いている株を2〜3週借りる（交配の父・図鑑・見せる依頼に使える）
+function q2LoanSps(){ return Q2_LOAN_SP.filter(function(s){ return isUn(s); }); }
+function q2Borrow(tid, sp){
+  var t = q2Tix(tid); if (!t || t.k !== 'kloan') return { ok: false };
+  if (q2LoanSps().indexOf(sp) < 0) return { ok: false, reason: 'その植物は借りられません。' };
+  var pot = G.pots.indexOf(null); if (pot < 0) return { ok: false, reason: '空いている鉢がありません。' };
+  var seed = (G.seed * 61 + G.week * 37 + strHash(sp)) | 0;
+  var p = withSeedAll(seed, function(){ return shopPlant(sp, 'bloom', mb(seed ^ 0x2c1b), 1); });
+  var id = 'p' + (G.nid++); p.id = id; p.pot = pot; p.name = 'カエラの秘蔵（' + q2SpN(sp) + '）'; delete p.bk;
+  p.borrowed = { back: G.week + (t.wk || 2) };
+  p.last = p.short = 'カエラから借りている秘蔵の株（' + weekLabel(p.borrowed.back) + 'まで）'; p.hist = [{ w: G.week, t: 'カエラから秘蔵の株を借りた' }];
+  G.plants[id] = p; G.pots[pot] = id;
+  var news = []; try { news = dexOnBloom(p).concat(dexMuts(p)); } catch (e) {}
+  q2TixUse(t);
+  G.log.unshift({ w: G.week, t: '👒 カエラから秘蔵の株を借りた（' + weekLabel(p.borrowed.back) + 'まで）' + (news.length ? '。図鑑に「' + news.join('」「') + '」を登録した' : '') });
+  return { ok: true, p: p, news: news };
+}
+// ルカの「必ず持ち帰る」採取: ただで、指定した特徴を必ず持ち帰る（重は野生だけの珍しい株も）
+var _q2Sure = false, _q2Rare = false;
+function q2LukaGo(tid, rid, wish){
+  var t = q2Tix(tid); if (!t || t.k !== 'luka') return { ok: false };
+  var r = EX_REGIONS.find(function(x){ return x.id === rid; }); if (!r || !isUn(r.sp)) return { ok: false, reason: '行き先を選んでください。' };
+  G.exped = G.exped || [];
+  if (G.exped.some(function(e){ return !e.done && e.adv === 'luka'; })) return { ok: false, reason: 'ルカはいま出かけています。' };
+  if (G.exped.filter(function(e){ return !e.done; }).length >= EX_MAX) return { ok: false, reason: '同時に頼めるのは' + EX_MAX + '件までです。' };
+  if (wish && !exWishes(r.sp).some(function(w){ return w.id === wish; })) wish = '';
+  var e = { id: 'e' + (G.week * 10 + G.exped.length), region: rid, adv: 'luka', wish: wish || '', start: G.week, back: G.week + r.wk, fee: 0, done: false, sure: true, sureRare: !!t.rare };
+  G.exped.unshift(e); if (G.exped.length > 12) G.exped.length = 12;
+  q2TixUse(t); G.stat.lukaGo = (G.stat.lukaGo || 0) + 1;
+  G.log.unshift({ w: G.week, t: '🧒 ルカが約束の採取で「' + r.n + '」へ出かけた' });
+  return { ok: true, e: e };
+}
+var _exChanceQ2 = exChance;
+exChance = function(r, a, wish){ return _q2Sure ? 1 : _exChanceQ2(r, a, wish); };
+(function(){ var L = EX_ADV.find(function(a){ return a.id === 'luka'; }); if (!L) return; var d = Object.getOwnPropertyDescriptor(L, 'radd'), get = d && d.get ? d.get : (function(v){ return function(){ return v; }; })(L.radd || 0);
+  Object.defineProperty(L, 'radd', { get: function(){ return get.call(L) + (_q2Rare ? 1 : 0); }, configurable: true }); })();
+var _exTickQ2 = exTick;
+exTick = function(notes){
+  var all = G.exped || [], due = all.filter(function(e){ return e.sure && !e.done && G.week >= e.back; });
+  due.forEach(function(e){ try { _q2Sure = true; _q2Rare = !!e.sureRare; G.exped = [e]; _exTickQ2(notes); } finally { _q2Sure = false; _q2Rare = false; G.exped = all; } });
+  return _exTickQ2(notes);
+};
+// マシマの特別審査: 今咲いている株を1つ、4人に見てもらう（点数と講評・記念品）
+function q2Judge(tid, pid){
+  var t = q2Tix(tid), p = G.plants[pid]; if (!t || t.k !== 'judge') return { ok: false };
+  if (!p || !contestReady(p)) return { ok: false, reason: '咲いている株（ブルーベリーは熟した実のある株）を選んでください。' };
+  var sc = scorePlant(p), K = ['d', 'col', 'pat', 'mut', 'har'], main = Math.round(80 * K.reduce(function(s, k){ return s + sc[k]; }, 0) / 5 / 100);
+  var r = q2Rng(strHash(p.id)), ids = spOf(p) === 'bb' ? ['j5', 'j1', 'j4', 'j6'] : ['j1', 'j3', 'j4', 'j6'];
+  var hit = false; try { hit = plantColName(p) === trendCol(spOf(p), seasonYear(G.week)); } catch (e) {}
+  var js = ids.map(function(j){ var pf = JPREF[j], v = pf === 'trend' ? (hit ? 95 : Math.min(70, main)) : sc[pf]; return { id: j, n: JUDGES[j].n, pf: pf, v: v, b: pf === 'trend' ? (hit ? 5 : 1) : 1 + Math.round(v / 100 * 4), c: judgeLine(j, v, r) }; });
+  var total = main + js.reduce(function(s, x){ return s + x.b; }, 0);
+  var lo = K.slice().sort(function(a, b){ return sc[a] - sc[b]; })[0], hi = K.slice().sort(function(a, b){ return sc[b] - sc[a]; })[0];
+  var gift = total >= 85 ? 800 : total >= 70 ? 400 : 200; if (t.big) gift *= 2;
+  earn(gift, 'マシマの特別審査の記念品'); q2TixUse(t);
+  var res = { name: p.name, total: total, main: main, js: js, lo: JPREF_N[lo] || lo, hi: JPREF_N[hi] || hi, sc: sc, gift: gift };
+  G.log.unshift({ w: G.week, t: '🎩 特別審査で「' + p.name + '」が ' + total + '点（記念品 ' + yen(gift) + '）' });
+  return { ok: true, res: res };
+}
+
+// ---- 貸出中・借りている株の決まり ----
+var _crossCheckQ2 = crossCheck;
+crossCheck = function(m, d){
+  var mom = G.plants[m], dad = G.plants[d];
+  if (mom && mom.lent) return '「' + mom.name + '」は貸出中です（' + weekLabel(mom.lent.back) + 'に戻ります）。';
+  if (dad && dad.lent) return '「' + dad.name + '」は貸出中です（' + weekLabel(dad.lent.back) + 'に戻ります）。';
+  if (mom && mom.borrowed) return '「' + mom.name + '」はカエラから借りている株なので、母（種をとる株）にはできません。父にはできます。';
+  return _crossCheckQ2(m, d);
+};
+if (typeof xMomBlock === 'function') { var _xMomBlockQ2 = xMomBlock;
+xMomBlock = function(p){ if (p && p.lent) return '「' + p.name + '」は貸出中です'; if (p && p.borrowed) return '「' + p.name + '」は借りている株なので母にはできません'; return _xMomBlockQ2(p); }; }
+var _harvestQ2 = harvest;
+harvest = function(id){ var p = G.plants[id]; if (p && p.lent) return { ok: false, reason: '「' + p.name + '」は貸出中です（' + weekLabel(p.lent.back) + 'に戻ります）。' }; return _harvestQ2(id); };
+var _clearPotQ2 = clearPot;
+clearPot = function(i){ var p = potPlant(i); if (p && p.lent) return { ok: false, reason: '貸出中の株は片付けられません。' }; if (p && p.borrowed) return { ok: false, reason: 'カエラから借りている株です。' + weekLabel(p.borrowed.back) + 'に返します。' }; return _clearPotQ2(i); };
+var _contestReadyQ2 = contestReady;
+contestReady = function(p){ return !!p && !p.lent && !p.borrowed && _contestReadyQ2(p); };
+var _sellPlantQ2 = sellPlant;
+sellPlant = function(pid){ var p = G.plants[pid]; if (p && (p.lent || p.borrowed)) return { ok: false, reason: p.lent ? '貸出中の株は売れません。' : '借りている株は売れません。' }; return _sellPlantQ2.apply(this, arguments); };
+var _frGiftQ2 = frGift;
+frGift = function(k, pid){ var p = G.plants[pid]; if (p && (p.lent || p.borrowed)) return null; var r = _frGiftQ2(k, pid); if (r) q2()._gift = G.week; return r; };
+var _eventDamageQ2 = eventDamage;
+eventDamage = function(p, env, notes){ if (p && p.lent) return; return _eventDamageQ2(p, env, notes); };
+var _simPlantQ2 = simPlant;
+simPlant = function(p, env){ if (!p || !p.lent) return _simPlantQ2(p, env); var h = p.health, w = p.water, f = p.fert; var r = _simPlantQ2(p, env); p.health = Math.max(p.health, h); p.water = w; p.fert = f; return r; };
+
+// ===== v7.43 依頼の作り直し: 画面（いまの依頼の掲示板の形のまま中身を入れ替え） =====
+var Q2_THX = { okami: 'ありがとう、助かるわ！', yoshida: 'すまんのう。大事にするよ。', kaede: 'ありがとう、サナさん。大切にするわ。', seriza: 'ありがとう。いい研究になりそうだ。', luka: 'ありがとう、サナ！', mashima: 'かたじけない。皆も喜びますぞ。' };
+function q2RwPreview(q, lv){
+  var k = q.who, sp = q.sp, a = [];
+  lv = lv || q.lv;
+  if (k === 'okami' && lv >= 2) a.push('店にまだない種の取り置き' + (lv >= 3 ? '（2袋）' : ''));
+  if (k === 'yoshida' && lv >= 2) a.push('朝露の輪の「種の交換会」への招待（古い系統の袋を' + (lv >= 3 ? 5 : 3) + 'つから）');
+  if (k === 'kaede' && lv >= 2) a.push('秘蔵の株を' + (lv >= 3 ? 3 : 2) + '週間借りられる');
+  if (k === 'seriza') a.push('種袋の鑑定（隠れた性質を' + lv + 'つ）');
+  if (k === 'luka' && lv >= 2) a.push('必ず持ち帰る採取 1回' + (lv >= 3 ? '（珍しい株つき）' : ''));
+  if (k === 'mashima' && lv >= 2) a.push('特別審査 1回');
+  if (k === 'claude' || k === 'milka' || k === 'amari' || k === 'yuina') a.push('審査の好みのひとこと');
+  if (k === 'bald') a.push('遠い土地の珍しい種');
+  if (k === 'town') a.push('鉢のデザイン');
+  a.push(yen(q2Money(sp, lv)));
+  return a.join('＋');
+}
+function q2PlantPick(q, act, label, extra){
+  var L = q2Plants(q);
+  if (!L.length) return '<div class="small q2none">いま使える株がありません（' + (q.kind === 'grow' ? '条件に合う' : '咲いている') + q2SpN(q.sp) + 'が要ります）。</div>';
+  return '<div class="pickrow">' + L.map(function(p){
+    var b = '<div class="pick q2pk"><b>' + esc(p.name) + '</b>' + (p.borrowed ? '<span class="small">借りている株</span>' : '');
+    if (q.kind === 'grow') b += '<button class="pri" data-act="q2do" data-q="' + q.id + '" data-id="' + p.id + '" data-m="give">渡す</button><button data-act="q2do" data-q="' + q.id + '" data-id="' + p.id + '" data-m="show">見せる</button>';
+    else if (UI.q2c === q.id + ':' + p.id) b += '<span class="small">' + label + 'と、手もとから' + (q.kind === 'lend' ? (q.wk || 2) + '週はなれます' : 'なくなります') + '。</span><button class="pink" data-act="q2do" data-q="' + q.id + '" data-id="' + p.id + '">' + label + '</button><button data-act="q2cx">やめる</button>';
+    else b += '<button class="pri" data-act="' + act + '" data-q="' + q.id + '" data-id="' + p.id + '">' + label + '</button>';
+    return b + '</div>';
+  }).join('') + '</div>';
+}
+function q2CardHTML(q){
+  var P = Q2_P[q.who], nm = q.tn || P.n, K = Q2_KIND[q.kind];
+  var o = '<div class="cbox q2c"><b>' + P.ic + ' ' + esc(nm) + '</b> <span class="tag">' + K.n + '・' + (q.kind === 'grow' ? '長期' : Q2_LV[q.lv]) + '</span>' + (q.fav ? ' <span class="small" title="この人の好きな花">♥</span>' : '');
+  o += '<div class="q2t">「' + esc(q.t) + '」</div>';
+  o += '<div class="small">' + (q.kind === 'grow' ? 'お返し: 渡すと ' + q2RwPreview(q, 3) + '／見せるだけなら ' + q2RwPreview(q, 2) : 'お返し: ' + q2RwPreview(q)) + '・期限 ' + weekLabel(q.due) + '</div>';
+  if (q.lentPid) { var lp = G.plants[q.lentPid]; return o + '<div class="small q2lent">📦 「' + esc(lp ? lp.name : '') + '」を貸しています（' + weekLabel(q.lentBack) + 'に戻ってきて、お返しをもらえます）</div></div>'; }
+  if (q.kind === 'grow' && !q.acc) return o + '<div class="small">受けると、条件の花が咲いたときにここから渡すか見せるかを選べます。受けなくても損はしません。</div><div class="cbtns" style="justify-content:flex-end"><button data-act="q2no" data-q="' + q.id + '">今回は見送る</button><button class="pri" data-act="q2acc" data-q="' + q.id + '">受ける</button></div></div>';
+  if (q.kind === 'seed') {
+    var ks = q2Packets(q);
+    o += ks.length ? '<div class="pickrow">' + ks.map(function(k){ return '<div class="pick" style="cursor:pointer" data-act="q2do" data-q="' + q.id + '" data-pk="' + k.id + '">' + miniFlower(k.iconPh || k.momPh, 36) + '<b>' + esc(k.label) + '</b><span class="small">この袋をわたす（' + k.seeds.length + (k.bulb ? '球' : '粒') + '）</span></div>'; }).join('') + '</div>' : '<div class="small q2none">渡せる種袋がありません（' + q2SpN(q.sp) + 'の種袋が要ります）。</div>';
+  } else if (q.kind === 'grow') o += q2PlantPick(q);
+  else o += q2PlantPick(q, q.kind === 'give' || q.kind === 'more' || q.kind === 'lend' ? 'q2ask' : 'q2do', { show: '見せる', cut: '一輪あげる', lend: (q.wk || 2) + '週間貸す', give: '株ごと譲る', more: 'この株を譲る' }[q.kind]);
+  o += '<div style="text-align:right"><button data-act="q2no" data-q="' + q.id + '" style="font-size:12px">' + (q.kind === 'grow' ? 'やめる' : '断る') + '</button></div>';
+  return o + '</div>';
+}
+var Q2_TIXN = { swap: '👴 朝露の輪の「種の交換会」への招待', appr: '🔬 博士の鑑定', kloan: '👒 カエラの秘蔵の株を借りる約束', luka: '🧒 ルカの「必ず持ち帰る」採取', judge: '🎩 マシマの特別審査' };
+function q2TixLine(t){ return Q2_TIXN[t.k] + (t.k === 'appr' ? '（隠れた性質を' + t.n + 'つ）' : t.k === 'kloan' ? '（' + t.wk + '週間）' : t.k === 'swap' ? '（' + t.offers.length + '袋から1つ）' : t.k === 'luka' && t.rare ? '（珍しい株つき）' : ''); }
+function q2BoardHTML(){
+  var Q = q2(), o = '';
+  o += '<div class="small" style="margin:-2px 0 8px">町の人の頼みごとです。受けるかどうかは自由で、断っても期限が切れても損はしません。応えると親しくなれて、その人ならではのお返しがもらえます。</div>';
+  if (Q.tix.length) o += '<div class="cbox q2tixb"><b>🎁 もらったお返し（使えるもの）</b>' + Q.tix.map(function(t){ return '<div class="q2tl"><span>' + q2TixLine(t) + '</span><button class="pri" data-act="q2tix" data-t="' + t.id + '">使う</button></div>'; }).join('') + '</div>';
+  var open = q2Open().sort(function(a, b){ return (a.kind === 'grow') - (b.kind === 'grow') || a.due - b.due; });
+  if (!open.length) o += '<p class="small">いまは頼みごとがありません。花が咲くと、見かけた町の人が何か頼んでくることがあります。</p>';
+  open.forEach(function(q){ o += q2CardHTML(q); });
+  if ((Q.hints || []).length) o += '<div class="cbox q2hint"><b>🗒 審査員のひとこと</b>' + Q.hints.slice(0, 3).map(function(h){ return '<div class="small">' + weekLabel(h.w) + ' ' + esc(h.t) + '</div>'; }).join('') + '</div>';
+  var past = Q.list.filter(function(q){ return q.done; });
+  if (past.length) o += '<div class="small q2past"><b>この前の頼み</b>' + past.map(function(q){ return '<div>' + (Q2_P[q.who] || {}).ic + ' ' + esc(q.tn || q2Name(q.who)) + '：' + (q.done === 'ok' ? '✓ ' + esc(q.how || '') + (q.rw ? '（お返し: ' + esc(q.rw) + '）' : '') : q.done === 'no' ? '見送った' : '期限が過ぎた') + '</div>'; }).join('') + '</div>';
+  return o;
+}
+// ---- お返しを使う画面 ----
+function q2TixPanel(t){
+  var o = '<div class="cbox q2panel"><b>' + q2TixLine(t) + '</b>';
+  if (t.k === 'swap') {
+    o += '<div class="small">朝露の輪の仲間が長年つないできた古い系統の種と、あなたの種袋1つを交換します。どの袋にも、何か隠れた性質（変異）が入っているそうです。何かは咲かせるまで分かりません。</div><div style="margin-top:6px"><b>輪の袋</b></div><div class="pickrow">' +
+      t.offers.map(function(k, i){ var on = UI.q2o === i; return '<div class="pick" data-act="q2o" data-v="' + i + '" style="cursor:pointer' + (on ? ';outline:2px solid #c2557c' : '') + '">' + miniFlower(k.iconPh, 36) + '<b>' + esc(k.label) + '</b><span class="small">' + esc(q2SpN(k.sp || 'asa')) + '・' + k.seeds.length + (k.bulb ? '球' : '粒') + '</span></div>'; }).join('') + '</div>';
+    var mine = G.packets.filter(function(k){ return k.seeds && k.seeds.length; });
+    o += '<div style="margin-top:6px"><b>交換に出す袋</b></div><div class="pickrow">' + (mine.length ? mine.map(function(k){ var on = UI.q2k === k.id; return '<div class="pick" data-act="q2k" data-v="' + k.id + '" style="cursor:pointer' + (on ? ';outline:2px solid #c2557c' : '') + '">' + miniFlower(k.iconPh || k.momPh, 36) + '<b>' + esc(k.label) + '</b><span class="small">' + k.seeds.length + (k.bulb ? '球' : '粒') + '</span></div>'; }).join('') : '<span class="small">種袋がありません。</span>') + '</div>';
+    o += '<div class="cbtns" style="justify-content:flex-end"><button class="pink" data-act="q2swap" data-t="' + t.id + '"' + (UI.q2o != null && UI.q2k ? '' : ' disabled') + '>交換する</button></div>';
+  } else if (t.k === 'appr') {
+    var ks = G.packets.filter(function(k){ return k.seeds && k.seeds.length; });
+    o += '<div class="small">種袋を1つ選ぶと、博士がその袋の種に隠れている性質（変異）を' + t.n + 'つまで教えてくれます。図鑑にまだない変異を先に教えてくれます。結果は種袋の説明に書き足されます。</div><div class="pickrow">' +
+      (ks.length ? ks.map(function(k){ return '<div class="pick" data-act="q2appr" data-t="' + t.id + '" data-pk="' + k.id + '" style="cursor:pointer">' + miniFlower(k.iconPh || k.momPh, 36) + '<b>' + esc(k.label) + '</b><span class="small">' + k.seeds.length + (k.bulb ? '球' : '粒') + (k.appr && k.appr.length ? '・鑑定済み' : '') + '</span></div>'; }).join('') : '<span class="small">種袋がありません。</span>') + '</div>';
+  } else if (t.k === 'kloan') {
+    var sps = q2LoanSps(), free = G.pots.indexOf(null) >= 0;
+    o += '<div class="small">カエラの温室の、咲いている株を' + t.wk + '週間借ります。空き鉢に置かれ、期間が終わると返します。<br>・交配の父（花粉をとる株）にできます（母にはできません）<br>・咲いた花は図鑑に登録されます<br>・「見せて」「一輪」の頼みに使えます<br>・その植物の育ち方を1株で試せます</div>';
+    o += free ? '<div class="cbtns" style="justify-content:flex-start;flex-wrap:wrap">' + sps.map(function(s){ return '<button class="pri" data-act="q2loan" data-t="' + t.id + '" data-sp="' + s + '">' + esc(q2SpN(s)) + 'を借りる</button>'; }).join('') + '</div>' : '<div class="small q2none">空いている鉢がありません。鉢を1つ空けてから使ってください。</div>';
+  } else if (t.k === 'luka') {
+    var rs = EX_REGIONS.filter(function(x){ return isUn(x.sp); }), cur = UI.q2r && rs.some(function(x){ return x.id === UI.q2r; }) ? UI.q2r : (rs[0] || {}).id, R = rs.find(function(x){ return x.id === cur; });
+    var busy = (G.exped || []).some(function(e){ return !e.done && e.adv === 'luka'; });
+    o += '<div class="small">ルカが、指定した特徴の野生の株を必ず持ち帰ります（お金はかかりません）。' + (t.rare ? '野生だけの珍しい株も見つけてきます。' : '') + '</div>';
+    o += '<div style="margin-top:6px"><b>行き先</b><br><select id="q2reg">' + rs.map(function(x){ return '<option value="' + x.id + '"' + (x.id === cur ? ' selected' : '') + '>' + esc(x.n) + '（' + x.wk + '週）</option>'; }).join('') + '</select></div>';
+    var ws = R ? exWishes(R.sp) : [];
+    o += '<div style="margin-top:6px"><b>探してほしい特徴</b><br><select id="q2wish"><option value="">指定しない</option>' + ws.map(function(w){ return '<option value="' + w.id + '">' + esc(w.n) + '</option>'; }).join('') + '</select></div>';
+    o += busy ? '<div class="small q2none">ルカはいま出かけています。帰ってきてから使ってください。</div>' : '<div class="cbtns" style="justify-content:flex-end"><button class="pink" data-act="q2luka" data-t="' + t.id + '">出かけてもらう</button></div>';
+  } else if (t.k === 'judge') {
+    var L = livingPlants().filter(contestReady);
+    o += '<div class="small">品評会を待たずに、今咲いている株を1つ、審査員4人に見てもらえます。点数と、どこが評価されたか・足りないかを教えてもらえます。</div><div class="pickrow">' +
+      (L.length ? L.map(function(p){ return '<div class="pick q2pk"><b>' + esc(p.name) + '</b><button class="pri" data-act="q2judge" data-t="' + t.id + '" data-id="' + p.id + '">審査してもらう</button></div>'; }).join('') : '<span class="small">咲いている株がありません。</span>') + '</div>';
+  }
+  return o + '<div class="cbtns" style="justify-content:flex-start;margin-top:8px"><button data-act="q2back">← 依頼へ</button></div></div>';
+}
+function q2JudgeHTML(r){
+  var o = '<div class="cbox q2panel"><b>🎩 特別審査「' + esc(r.name) + '」</b><div style="font-size:20px;margin:4px 0"><b>' + r.total + '点</b> <span class="small">（花の出来 ' + r.main + '点＋審査員 ' + (r.total - r.main) + '点）</span></div>';
+  o += r.js.map(function(j){ return '<div class="small"><b>' + esc(j.n) + '</b>（' + esc(JPREF_N[j.pf] || '') + ' +' + j.b + '）「' + esc(j.c) + '」</div>'; }).join('');
+  o += '<div class="small" style="margin-top:6px">いちばん評価されたのは<b>' + esc(r.hi) + '</b>、足りないのは<b>' + esc(r.lo) + '</b>。記念品 ' + yen(r.gift) + '</div>';
+  return o + '<div class="cbtns" style="justify-content:flex-start;margin-top:8px"><button data-act="q2back">← 依頼へ</button></div></div>';
+}
+function q2ShowQuests(){
+  var o = '<h3>📜 依頼</h3>', st = RESEARCH[G.research || 0];
+  if (typeof chainHTML === 'function') o += chainHTML();
+  o += '<div class="cbox"><b>🔬 セリザ博士の研究</b> <span class="small">（' + (G.research || 0) + '/' + RESEARCH.length + '・取り消しできない続きもの）</span><br>';
+  if (st) o += esc(st.t) + '　<span class="small">謝礼 ' + yen(st.r) + '</span><br><button class="' + (st.ok() ? 'pink' : '') + '" data-act="research"' + (st.ok() ? '' : ' disabled') + '>' + (st.ok() ? '成果を報告する' : 'まだ報告できません') + '</button>';
+  else o += '博士の図鑑は完成しました。ありがとうございました。<button data-act="ending">エンディングをもう一度見る</button>';
+  o += '</div>';
+  var t = UI.q2t && q2Tix(UI.q2t);
+  if (UI.q2res) o += q2JudgeHTML(UI.q2res);
+  else if (t) o += q2TixPanel(t);
+  else { UI.q2t = null; o += q2BoardHTML(); }
+  openModal(o);
+}
+if (typeof placeWrap === 'function') _showQuestsBoard = placeWrap('board', q2ShowQuests);
+else showQuests = q2ShowQuests;
+function q2Thanks(r){
+  var q = r.q, P = Q2_P[q.who], spk = P.spk && typeof CAST !== 'undefined' && CAST[P.spk] ? P.spk : '', nm = q.tn || P.n;
+  var L = [['', r.what + '。'], [spk, (spk ? '' : nm + '「') + (Q2_THX[q.who] || 'ありがとう。') + (spk ? '' : '」')]];
+  if (r.rw) L.push(['', 'お返し: ' + r.rw]);
+  save(); render();
+  playTalk(nm + 'の頼み', L, function(){ closeModal(); showQuests(true); }, '閉じる');
+}
+document.addEventListener('click', function(e){
+  var el = e.target.closest && e.target.closest('[data-act]'); if (!el) return;
+  var a = el.dataset.act; if (!/^q2/.test(a)) return;
+  e.stopPropagation();
+  var r, t;
+  if (a === 'q2ask') { UI.q2c = el.dataset.q + ':' + el.dataset.id; showQuests(true); }
+  else if (a === 'q2cx') { UI.q2c = null; showQuests(true); }
+  else if (a === 'q2do') {
+    UI.q2c = null; r = q2Fulfill(el.dataset.q, el.dataset.id, el.dataset.pk, el.dataset.m);
+    if (!r.ok) { toast(r.reason || 'できませんでした'); showQuests(true); return; }
+    if (r.lent) { toast(r.what); save(); render(); showQuests(true); return; }
+    q2Thanks(r);
+  }
+  else if (a === 'q2acc') { q2Accept(el.dataset.q); toast('頼みを受けました'); save(); showQuests(true); }
+  else if (a === 'q2no') { q2Decline(el.dataset.q); save(); showQuests(true); }
+  else if (a === 'q2tix') { UI.q2t = el.dataset.t; UI.q2o = null; UI.q2k = null; UI.q2res = null; showQuests(true); }
+  else if (a === 'q2back') { UI.q2t = null; UI.q2res = null; showQuests(true); }
+  else if (a === 'q2o') { UI.q2o = +el.dataset.v; showQuests(true); }
+  else if (a === 'q2k') { UI.q2k = el.dataset.v; showQuests(true); }
+  else if (a === 'q2swap') { r = q2Swap(el.dataset.t, UI.q2o, UI.q2k); if (!r.ok) { toast(r.reason || 'できませんでした'); return; } UI.q2t = null; save(); render(); playTalk('朝露の輪の交換会', [['yoshida', 'ほう、いい袋を選んだのう。'], ['', '「' + r.gave.label + '」と「' + r.got.label + '」を交換した（種の一覧に入りました）。'], ['yoshida', '何が隠れとるかは、咲かせてのお楽しみじゃ。']], function(){ closeModal(); showQuests(true); }, '閉じる'); }
+  else if (a === 'q2appr') { r = q2Appraise(el.dataset.t, el.dataset.pk); if (!r.ok) { toast(r.reason || 'できませんでした'); return; } UI.q2t = null; save(); render(); playTalk('博士の鑑定', [['', '博士はルーペで種をひと粒ずつ見ていった。'], ['', r.n ? '「' + r.txt + '」' : '「この袋には、目立った隠れた性質はないね」'], ['', r.more ? '「ほかにも何かありそうだが、今日はここまでだ」' : '（種袋の説明に書き足しました）']], function(){ closeModal(); showQuests(true); }, '閉じる'); }
+  else if (a === 'q2loan') { r = q2Borrow(el.dataset.t, el.dataset.sp); if (!r.ok) { toast(r.reason || 'できませんでした'); return; } UI.q2t = null; save(); render(); playTalk('カエラの秘蔵の株', [['kaede', 'この子を貸してあげる。' + weekLabel(r.p.borrowed.back) + 'には返してね。'], ['', '「' + r.p.name + '」を鉢' + (r.p.pot + 1) + 'に置いた。' + (r.news.length ? '図鑑に「' + r.news.join('」「') + '」を登録した。' : '')]], function(){ closeModal(); showQuests(true); }, '閉じる'); }
+  else if (a === 'q2luka') { var rg = document.getElementById('q2reg'), wi = document.getElementById('q2wish'); r = q2LukaGo(el.dataset.t, rg ? rg.value : '', wi ? wi.value : ''); if (!r.ok) { toast(r.reason || 'できませんでした'); return; } UI.q2t = null; save(); render(); toast('ルカが出かけました。帰りは' + weekLabel(r.e.back)); showQuests(true); }
+  else if (a === 'q2judge') { r = q2Judge(el.dataset.t, el.dataset.id); if (!r.ok) { toast(r.reason || 'できませんでした'); return; } UI.q2t = null; UI.q2res = r.res; save(); render(); showQuests(true); }
+}, true);
+// 行き先を変えたら、探す特徴の候補を作り直す
+document.addEventListener('change', function(e){ if (e.target && e.target.id === 'q2reg') { UI.q2r = e.target.value; showQuests(true); } }, true);
+// 鉢に「貸出中」「借りている株」
+var _renderPotQ2 = renderPot;
+renderPot = function(i){
+  var h = _renderPotQ2(i), p = potPlant(i); if (!p || !(p.lent || p.borrowed)) return h;
+  var b = p.lent ? '<div class="q2badge">📦 ' + esc(q2Name(p.lent.to)) + 'に貸出中（' + weekLabel(p.lent.back) + 'に戻る）</div>' : '<div class="q2badge">👒 カエラから借りている株（' + weekLabel(p.borrowed.back) + 'に返す）</div>';
+  var j = h.lastIndexOf('</div>'); return j < 0 ? h + b : h.slice(0, j) + b + h.slice(j);
+};
+// 貸出中の株は世話できない
+window.addEventListener('click', function(e){
+  var el = e.target.closest && e.target.closest('[data-act]'); if (!el || typeof AWAY_ACTS === 'undefined' || !AWAY_ACTS.test(el.dataset.act)) return;
+  var id = el.dataset.id || el.dataset.pid || el.dataset.v, p = id && G.plants[id];
+  if (!p) { var c = el.closest('#pots > *'), g = el.closest('[data-pid]'); if (g) p = G.plants[g.dataset.pid]; else if (c && c.dataset.i != null) p = potPlant(+c.dataset.i); }
+  if (!p || !p.lent) return;
+  e.stopPropagation(); e.preventDefault();
+  toast('「' + p.name + '」は' + q2Name(p.lent.to) + 'に貸出中です（' + weekLabel(p.lent.back) + 'に戻ります）');
+}, true);
+var _renderTownQ2 = renderTown;
+renderTown = function(){ return _renderTownQ2().replace(/依頼 \d+件/, '依頼 ' + q2Open().length + '件'); };
+(function(){
+  var st = document.createElement('style');
+  st.textContent = '.q2c .q2t{margin:4px 0}.q2c .tag{font-size:11px}.q2pk{display:flex;flex-direction:column;gap:4px;align-items:flex-start}.q2pk button{font-size:12px;padding:3px 10px}' +
+    '.q2none{color:#8a7a6a;margin:4px 0}.q2tl{display:flex;align-items:center;gap:8px;justify-content:space-between;margin-top:4px}.q2tl button{white-space:nowrap;flex:0 0 auto}.q2tixb{background:#fbf3df}' +
+    '.q2past{margin-top:8px;border-top:1px solid var(--line);padding-top:6px}.q2badge{font-size:12px;background:#eef3fb;border:1px solid #c9d6ea;border-radius:8px;padding:2px 6px;margin:4px 0}.q2lent{background:#eef3fb;border-radius:8px;padding:4px 6px;margin-top:4px}';
+  document.head.appendChild(st);
+})();
 </script>
 <script>
 // ホーム画面版: オフラインで起動できるようにする＋セーブを消されにくくする
